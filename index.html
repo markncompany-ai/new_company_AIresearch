@@ -67,9 +67,21 @@
   .thumb img{max-width:100%;max-height:100%} .thumb .ring{position:absolute;inset:0;border:2px dashed rgba(0,0,0,.12);border-radius:50%;margin:9px;pointer-events:none}
   .thumb .st{font-size:10px;color:var(--sub);text-align:center;padding:3px}
   .kwbox .lbl{font-size:12px;color:var(--sub);margin-top:8px;margin-bottom:3px}
+  .te-btn{background:#00A86B;color:#fff}
+  .te-btn:hover{background:#00966A}
+  .te-inputs input{width:100%;border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:13px}
+  .te-loading{display:inline-flex;gap:5px;align-items:center}
+  .te-loading .dot{width:6px;height:6px;border-radius:50%;background:#00A86B;display:inline-block;animation:teb 1.2s ease-in-out infinite}
+  .te-loading .dot:nth-child(2){animation-delay:.2s}
+  .te-loading .dot:nth-child(3){animation-delay:.4s}
+  @keyframes teb{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
+  .te-result{background:var(--okbg);border:1px solid var(--ok);border-radius:8px;padding:12px 14px}
+  #gtoast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#2c2c2c;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;z-index:9999;max-width:360px;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+  #gtoast.hidden{display:none}
 </style>
 </head>
 <body>
+<div id="gtoast" class="hidden"><span id="gtoast-msg"></span></div>
 <div class="top">
   <h1>기업 등록 검수 작업대</h1>
   <span class="desc">Claude가 찾은 데이터를 기업별로 검수 · 수정 · 복사</span>
@@ -87,7 +99,15 @@
       <div class="r">
         <button id="load">기업별 수집 데이터 확인하기</button>
         <button id="clr" class="ghost sm">초기화</button>
+        <label class="sm" style="cursor:pointer;background:#f1f3f6;border:1px solid var(--line);border-radius:7px;padding:5px 10px;font-size:12px">📂 JSON 파일 열기<input type="file" id="jsonfile" accept=".json,application/json" multiple style="display:none"></label>
         <span style="font-size:11px;color:var(--sub)">카테고리·키워드는 자동 추천, 검수는 사람이</span>
+      </div>
+      <div style="margin-top:6px;font-size:11px;color:var(--sub)">JSON 파일을 위 입력창에 끌어다 놓아도 됩니다 (여러 파일 동시 가능 — 자동으로 합쳐서 불러옴)</div>
+      <div style="margin-top:8px;padding:8px 12px;background:#f7f8fa;border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.7">
+        <b>왼쪽 목록 점 색상 기준</b> (홈페이지 기준 아님) —
+        <span style="color:var(--ok);font-weight:700">● 초록</span> 사업자번호+양식 소개글까지 확보 (조사 성공) ·
+        <span style="color:var(--warn);font-weight:700">● 노랑</span> 사업자번호는 있으나 소개글 없음 (정보를 거의 못 찾아 최소 등록한 기업 — 직접 조사 필요) ·
+        <span style="color:var(--err);font-weight:700">● 빨강</span> 사업자번호·홈페이지 모두 없음
       </div>
     </div>
     <div id="detail"><div class="empty">왼쪽에서 기업을 선택하거나, 위에 데이터를 붙여넣고 "기업별 수집 데이터 확인하기"를 누르세요.</div></div>
@@ -350,6 +370,7 @@ function parse(){
       aiKws: o.aiKws||[],
       phone: validPhone, phoneRejected: rejectedPhone,
       email: validEmail, emailTier: emailTier, emailRejected: rejectedEmail, emailNote: emailNote,
+      notes: Array.isArray(o.notes)? o.notes : (o.notes? [String(o.notes)] : []),
       logoStatus:'idle', logoData:null
     };
   });
@@ -388,38 +409,115 @@ function linkVal(url){
   if(!url) return '<span style="color:var(--sub)">—</span>';
   return '<a href="'+url+'" target="_blank" rel="noopener">'+url+'</a> <button class="sm ghost" data-copy="'+esc(url)+'" onclick="cpBtn(this)">복사</button>';
 }
-function cpBtn(el){ var t=el.getAttribute('data-copy'); if(t){ var d=document.createElement('textarea'); d.innerHTML=t; navigator.clipboard.writeText(d.value); var o=el.textContent; el.textContent='복사됨!'; setTimeout(function(){el.textContent=o;},1000); } }
-function copyAndOpenTranslator(el){ var t=el.getAttribute('data-copy'); if(t){ var d=document.createElement('textarea'); d.innerHTML=t; navigator.clipboard.writeText(d.value); } window.open('https://claude.ai/public/artifacts/2d30de12-b401-43ea-9a37-f7cce8b4c34f','_blank'); }
+// ── 입력 직후 클릭 무효화 방지 ─────────────────────────────
+// 입력(change) 시 화면 전체를 다시 그리면, 입력 직후 누른 버튼·링크가 클릭 도중 파괴되어
+// 클릭이 통째로 무효화된다(무반응 복사, 링크 안 열림, 입력칸 깜빡임).
+// 해결: change 핸들러는 화면을 다시 그리지 않고 상태와 필요한 부분만 갱신하며,
+// 복사 값은 클릭 시점에 최신 상태로 생성한다(data-live).
+
+// 복사 시점에 최신 상태로 값을 만든다 (재렌더 보류 중에도 CP ID·수정 소개글이 반영되게)
+function newsRowCopy(c,n){ return [(c.cp&&c.cp!=='CP미정')?c.cp:'', n.title||'', n.url||'', n.press||'', n.date||'', '1'].join(String.fromCharCode(9)); }
+function allNewsOf(c){ var dom=(c.news&&c.news.domestic)||[]; var frn=(c.news&&c.news.foreign)||[]; return dom.concat(frn); }
+function liveCopyVal(spec){
+  var c=companies[active]; if(!c) return '';
+  if(spec==='intro') return c.intro||'';
+  if(spec==='news:all') return allNewsOf(c).map(function(n){return newsRowCopy(c,n);}).join(String.fromCharCode(10));
+  if(spec.indexOf('news:')===0){ var n=allNewsOf(c)[parseInt(spec.slice(5),10)]; return n?newsRowCopy(c,n):''; }
+  return '';
+}
+
+function cpBtn(el){
+  var v;
+  var live=el.getAttribute('data-live');
+  if(live!==null){ v=liveCopyVal(live); }
+  else{
+    var t=el.getAttribute('data-copy'); if(!t) return;
+    var d=document.createElement('textarea'); d.innerHTML=t; v=d.value;
+  }
+  if(!v) return;
+  // 원래 라벨 보존 (연타 시 '복사됨!'이 원래 라벨로 저장되는 것 방지)
+  if(!el.getAttribute('data-orig')) el.setAttribute('data-orig', el.textContent);
+  var done=function(ok){ el.textContent = ok?'복사됨!':'복사 실패 — Ctrl+C 이용'; setTimeout(function(){ el.textContent = el.getAttribute('data-orig'); },1200); };
+  // 클립보드 API가 없거나(비보안 컨텍스트·일부 내장뷰어) 거부되면 execCommand 방식으로 폴백
+  var fallback=function(){
+    var ok=false;
+    try{
+      var ta=document.createElement('textarea'); ta.value=v;
+      ta.style.position='fixed'; ta.style.top='0'; ta.style.left='0'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      ok=document.execCommand('copy');
+      document.body.removeChild(ta);
+    }catch(e){ ok=false; }
+    done(ok);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(v).then(function(){ done(true); }, fallback);
+  } else { fallback(); }
+}
+// ── 인라인 번역 (혁신의숲 기업소개글 번역기 이식) ──────────────
+function showToast(msg){ var el=document.getElementById('gtoast'); if(!el)return; document.getElementById('gtoast-msg').textContent=msg; el.classList.remove('hidden'); if(window.__toastT)clearTimeout(window.__toastT); window.__toastT=setTimeout(function(){el.classList.add('hidden');},5000); }
+function updTransProduct(i,idx,v){ var c=companies[i]; if(!c.transProducts)c.transProducts=['','','']; c.transProducts[idx]=v; }
+async function doTranslate(i){
+  var c=companies[i];
+  var intro=(c.intro||'').trim();
+  if(!intro){ showToast('기업 소개글(4번)을 먼저 입력해주세요.'); return; }
+  var products=(c.transProducts||[]).map(function(s){return (s||'').trim();}).filter(Boolean);
+  var sourceLang='Korean', targetLang='English';
+  c.transLoading=true; renderDetail();
+  // 따옴표 감지: 영문 작은따옴표 및 유니코드 따옴표(‘’) 모두 (/g 없이 — lastIndex 버그 방지)
+  var hasQuoted=/'([^']+)'|‘([^’]+)’/.test(intro);
+  var processedIntro=intro;
+  if(hasQuoted && products.length>0){
+    var idx=0;
+    processedIntro=intro.replace(/'([^']+)'|‘([^’]+)’/g,function(match){ if(idx<products.length)return '['+products[idx++]+']'; return match; });
+  }
+  var quotedInstruction=hasQuoted?'- 대괄호([])로 감싸진 단어는 고유명사이므로 번역하지 말고 대괄호와 함께 그대로 유지하세요.\n':'';
+  var prompt='당신은 전문 번역가입니다. 아래 기업 소개글을 '+sourceLang+'에서 '+targetLang+'으로 번역해주세요.\n\n번역 지침:\n- 번역문에서 기업명을 직접 언급하지 마세요. 대신 "A company" 또는 "The company"로 시작하세요.\n'+quotedInstruction+'- 전문적이고 자연스러운 비즈니스 문체를 사용하세요.\n- 번역문만 출력하고 설명은 추가하지 마세요.\n\n원문:\n'+processedIntro;
+  try{
+    var controller=new AbortController();
+    var timeoutId=setTimeout(function(){controller.abort();},15000);
+    var res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ model:"claude-sonnet-5", max_tokens:1000, messages:[{role:"user",content:prompt}] }),
+      signal:controller.signal
+    });
+    clearTimeout(timeoutId);
+    var data=await res.json();
+    if(!res.ok||data.error){ showToast('결과를 불러오는 데 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.'); c.transLoading=false; renderDetail(); return; }
+    var text=(data.content||[]).map(function(b){return b.text||'';}).join('').trim();
+    if(!text){ showToast('번역 결과가 비어있습니다. 다시 시도해주세요.'); c.transLoading=false; renderDetail(); return; }
+    c.introEn=text; c.transLoading=false; renderDetail();
+  }catch(e){
+    if(e.name==='AbortError') showToast('요청 시간이 초과되었습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+    else showToast('결과를 불러오는 데 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+    c.transLoading=false; renderDetail();
+  }
+}
 
 function renderDetail(){
   if(active<0||!companies[active]){$('#detail').innerHTML='<div class="empty">기업을 선택하세요.</div>';return;}
   const c=companies[active];
-  const cpTag = (c.cp && c.cp!=='CP미정') ? '<span class="cp" style="background:var(--okbg);color:var(--ok);padding:2px 8px;border-radius:6px;font-weight:700">'+c.cp+' 확인됨</span>' : '<span class="cp">CP 미확인</span>';
-  let h='<div class="co-head"><h2>'+c.name+'</h2>'+cpTag+'</div>';
+  const cpVal = (c.cp && c.cp!=='CP미정') ? c.cp : '';
+  let h='<div class="co-head"><h2>'+c.name+'</h2>'+
+    '<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">CORP_ID '+
+    '<input type="text" inputmode="numeric" placeholder="숫자만 입력 (예: 40459)" value="'+esc((cpVal||'').replace(/\D/g,''))+'" style="width:160px;font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onchange="updCp('+active+',this.value)">'+
+    (cpVal?'<span id="cpbadge" class="badge b-ok">입력됨 · '+cpVal+'</span>':'<span id="cpbadge" class="badge b-idle">미입력 — 뉴스 복사에 포함됨</span>')+'</span></div>';
 
-  // 1. 홈페이지 · 로고 (맨 위 복원)
-  // 로고 화질 경고
-  var logoNote = '';
-  if(c.logoStatus==='ok'){
-    if(c.logoLowRes){
-      logoNote = '<div style="margin-top:6px;font-size:12px;color:var(--err);font-weight:600">⚠ 화질미달 — 원본 '+c.logoW+'×'+c.logoH+'px (256 확대 시 흐려짐, 고화질 로고 별도 확보 권장)</div>';
-    } else {
-      logoNote = '<div style="margin-top:6px;font-size:12px;color:var(--ok)">원본 '+c.logoW+'×'+c.logoH+'px · 화질 양호</div>';
-    }
+  // 0. 조사자 검수 노트 (JSON의 notes 배열 — 대표자 불일치, 동명회사 제외 이력 등)
+  if(c.notes && c.notes.length){
+    h+='<div class="field f-warn" style="background:var(--warnbg)"><div class="fh"><span class="ttl" style="color:var(--warn)">⚠ 검수 포인트 ('+c.notes.length+')</span></div>'+
+      '<div class="fval"><ul style="margin:4px 0 0 18px;padding:0">'+
+      c.notes.map(function(n){return '<li style="margin:3px 0;font-size:13px">'+n+'</li>';}).join('')+
+      '</ul></div><div class="reason">조사 단계에서 발견된 주의사항 — 등록 전 반드시 확인</div></div>';
   }
-  h+=field('1','홈페이지 · 로고',c.homepage?'ok':'err',
-    '<div class="logo-wrap"><div class="thumb" id="thumb"><div class="ring"></div></div><div style="flex:1">'+
-    (c.homepage?linkVal(c.homepage):'<span style="color:var(--err)">홈페이지 미확정 — 못 찾음</span>')+
-    (c.logo?'<div style="margin-top:6px"><button class="sm" onclick="dlLogo('+active+')" id="dlbtn">로고 256 다운로드</button></div>':'<div style="margin-top:6px;color:var(--sub);font-size:12px">로고 주소 미확보</div>')+
-    logoNote+
-    '</div></div>','점선 원 = 프론트 노출 영역 · 원본이 200px 미만이면 화질미달 표시');
 
-  // 2. 사업자등록번호 (복사전용)
-  h+=field('2','사업자등록번호',c.bizno?'ok':'idle',
+  // 1. 사업자등록번호 (복사전용) — 어드민 입력 순서에 맞춰 정렬
+  h+=field('1','사업자등록번호',c.bizno?'ok':'idle',
     readonlyVal(c.bizno),
     c.bizno?'값 대조 완료':'미확보 — 어드민에서 확인 후 입력 데이터에 포함');
 
-  // 3. 대표자 · SNS (배지 2개 분리: 대표자 / SNS)
+  // 7. 대표자 · SNS (배지 2개 분리: 대표자 / SNS)
   let repInner;
   var hasCeo = c.reps && c.reps.length && c.reps.some(function(r){return r.name;});
   var hasSns = c.reps && c.reps.length && c.reps.some(function(r){return r.sns&&r.sns.length;});
@@ -442,7 +540,7 @@ function renderDetail(){
   var ceoBadge = hasCeo ? '<span class="badge b-ok">대표자 확실</span>' : '<span class="badge b-idle">대표자 미확보</span>';
   var snsBadge = hasSns ? '<span class="badge b-warn">SNS 확인권장</span>' : '<span class="badge b-idle">SNS 미확보</span>';
   var repBorder = hasCeo ? (hasSns?'f-warn':'f-ok') : 'f-idle';
-  h+='<div class="field '+repBorder+'"><div class="fh"><span class="num">3</span><span class="ttl">대표자 · SNS</span>'+
+  var repField = '<div class="field '+repBorder+'"><div class="fh"><span class="num">7</span><span class="ttl">대표자 · SNS</span>'+
     '<span style="margin-left:8px">'+ceoBadge+' '+snsBadge+'</span></div>'+
     '<div class="fval">'+repInner+'</div>'+
     '<div class="reason">대표자와 SNS는 각각 확보 상태 표시 · 이름은 국문만 · ⚠ SNS는 동명이인 위험, 본인 확인 후 등록</div></div>';
@@ -454,29 +552,51 @@ function renderDetail(){
     '<span class="badge" style="margin-left:8px;background:#e6ebfb;color:#4655a8">참고자료</span></div>'+
     '<div class="fval"><div style="font-size:13px;color:#3a3a3a;line-height:1.65">'+
     (c.refIntro||'<span style="color:var(--sub)">참고 소개 없음</span>')+'</div></div>'+
-    '<div class="reason">수정 대상 아님 · 기업 이해용 · 아래 4·6·7번(양식소개·카테고리·키워드)이 이 내용 기반으로 생성됨</div></div>';
+    '<div class="reason">수정 대상 아님 · 기업 이해용 · 아래 2·5·6번(양식소개·카테고리·키워드)이 이 내용 기반으로 생성됨</div></div>';
 
-  // 5. 기업소개글 (양식) — 유일하게 수정 가능
-  h+=field('4','기업소개글 (양식)',c.intro?'warn':'idle',
+  // 2. 기업소개글 (양식) — 유일하게 수정 가능
+  h+=field('2','기업소개글 (양식)',c.intro?'warn':'idle',
     '<textarea placeholder="형상기억 고분자 기반 스마트 봉합사 개발 및 제조하는 기업" onchange="updIntro('+active+',this.value)">'+(c.intro||'')+'</textarea>'+
-    (c.intro?' <button class="sm ghost" data-copy="'+esc(c.intro)+'" onclick="cpBtn(this)">복사</button>':''),
+    (c.intro?' <button class="sm ghost" data-live="intro" data-copy="'+esc(c.intro)+'" onclick="cpBtn(this)">복사</button>':''),
     '유일하게 수정 가능한 항목 · 양식: ☆☆기반 □□대상 ~~을 ○○하는 기업 · 주관적표현 최소화 · 액션 가나다순+및 · 서비스명 없으면 생략 · 딥테크는 정확한 업계용어 확인');
 
-  // 6. 영문 — 번역기 연결 (복사+열기 한 번에)
-  h+=field('5','기업소개 (영문)','idle',
-    '<div style="font-size:13px;color:var(--sub);line-height:1.6">4번 국문을 확정한 뒤 아래 버튼을 누르면, 국문이 복사된 채 번역기가 열립니다.</div>'+
-    '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'+
-    (c.intro?'<button class="sm" data-copy="'+esc(c.intro)+'" onclick="copyAndOpenTranslator(this)">국문 복사 + 번역기 열기 ↗</button>':'<span style="color:var(--sub);font-size:12px">4번 국문을 먼저 확정하세요</span>')+
-    '</div>',
-    '버튼 클릭 시 4번 국문이 클립보드에 복사되고 번역기가 새 탭으로 열림 → 번역기에 붙여넣기(Ctrl+V)');
+  // 3. 기업소개 (영문) — 조사 단계에서 introEn으로 미리 제공됨 (버튼 번역은 claude.ai 아티팩트 환경 전용)
+  var teLoading = c.transLoading;
+  var teResult = c.introEn||'';
+  var tp = c.transProducts||['','',''];
+  var teInner =
+    '<div style="font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:8px">2번 국문을 확정한 뒤 번역하세요. 소개글 내 작은따옴표 고유명사는 아래 영문 서비스/제품명으로 등장 순서대로 치환됩니다. (선택)</div>'+
+    '<div class="te-inputs" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">'+
+      '<input type="text" placeholder="서비스/제품명 1" value="'+esc(tp[0]||'')+'" onchange="updTransProduct('+active+',0,this.value)">'+
+      '<input type="text" placeholder="서비스/제품명 2" value="'+esc(tp[1]||'')+'" onchange="updTransProduct('+active+',1,this.value)">'+
+      '<input type="text" placeholder="서비스/제품명 3" value="'+esc(tp[2]||'')+'" onchange="updTransProduct('+active+',2,this.value)">'+
+    '</div>'+
+    '<button class="sm te-btn" onclick="doTranslate('+active+')"'+((teLoading||!c.intro)?' disabled':'')+'>'+(teLoading?'번역 중...':'영어로 번역')+'</button>'+
+    (!c.intro?' <span style="color:var(--sub);font-size:12px">2번 국문을 먼저 확정하세요</span>':'')+
+    (teLoading?'<div class="te-loading" style="margin-top:10px"><span class="dot"></span><span class="dot"></span><span class="dot"></span> <span style="font-size:13px;color:var(--ok)">번역하는 중입니다...</span></div>':'')+
+    (teResult?'<div class="te-result" style="margin-top:10px"><div style="white-space:pre-wrap;font-size:14px;line-height:1.75">'+esc(teResult)+'</div><button class="sm ghost" style="margin-top:8px" data-copy="'+esc(teResult)+'" onclick="cpBtn(this)">영문 복사</button></div>':'');
+  h+=field('3','기업소개 (영문)', teResult?'ok':'idle', teInner,
+    '조사 단계에서 영문 소개가 미리 담겨 옴 — 그대로 복사 사용 · 2번 국문을 수정한 경우 재번역은 운영매니저에게 요청 (번역 버튼은 로컬에서 작동 안 함) · 작은따옴표 속 국문 서비스명은 공식 영문명 확인 후 교체');
 
-  // 7. 카테고리
+  // 4. 홈페이지 · 로고
+  var logoNote = logoNoteHtml(c);
+  var gSearch = 'https://www.google.com/search?tbm=isch&q='+encodeURIComponent(c.name.replace(/^\(주\)/,'')+' 로고');
+  var gBtn = '<a href="'+gSearch+'" target="_blank" rel="noopener" class="sm ghost" style="display:inline-block;margin-top:6px;text-decoration:none;border:1px solid var(--line);border-radius:7px;padding:4px 10px;font-size:12px">🔍 구글에서 "'+c.name.replace(/^\(주\)/,'')+' 로고" 이미지 검색</a>';
+  h+=field('4','홈페이지 · 로고',c.homepage?'ok':'err',
+    '<div class="logo-wrap"><div class="thumb" id="thumb"><div class="ring"></div></div><div style="flex:1">'+
+    (c.homepage?linkVal(c.homepage):'<span style="color:var(--err)">홈페이지 미확정 — 못 찾음</span>')+
+    (c.logo?'<div style="margin-top:6px"><button class="sm" onclick="dlLogo('+active+')" id="dlbtn">로고 256 다운로드</button></div>':'<div style="margin-top:6px;color:var(--sub);font-size:12px">로고 주소 미확보</div>')+
+    '<div id="logonote">'+logoNote+'</div>'+
+    '<div>'+gBtn+'</div>'+
+    '</div></div>','점선 원 = 프론트 노출 영역 · 원본이 200px 미만이면 화질미달 표시 · 로고가 없거나 화질미달이면 구글 이미지 검색으로 고화질 확보');
+
+  // 5. 카테고리
   let chips=CATEGORIES.map((cat,ci)=>{
     const idx=c.cats.indexOf(cat); const on=idx>=0;
     return '<span class="chip'+(on?' on':'')+'" onclick="toggleCat('+active+','+ci+')">'+
       (on?'<span class="ord">'+(idx+1)+'</span>':'')+cat+'</span>';
   }).join('');
-  h+=field('6','카테고리',c.cats.length?'ok':'idle',
+  h+=field('5','카테고리',c.cats.length?'ok':'idle',
     '<div class="chips">'+chips+'</div>',
     '[참고]소개 기반 자동 추천 · 숫자=순위(1·2·3순위) · 클릭으로 추가·해제·순서변경 (최대 3개)');
 
@@ -492,7 +612,7 @@ function renderDetail(){
   var aiChips = (c.aiKws||[]).map(function(k){return normalizeKw(k);})
     .filter(function(n){if(aiSeen[n])return false;aiSeen[n]=1;return true;})
     .map(function(n){return '<span class="chip on" style="background:#7c3aed;border-color:#7c3aed" title="Claude 조사 기반 추천">'+n+'</span>';}).join('');
-  h+=field('7','키워드',(dictList.length||(c.aiKws&&c.aiKws.length))?'ok':'idle',
+  h+=field('6','키워드',(dictList.length||(c.aiKws&&c.aiKws.length))?'ok':'idle',
     '<div class="kwbox">'+
     '<div class="lbl" style="color:#1d7a4d">■ 기업소개글 매칭 (소개글 단어 기반)</div>'+
     '<div class="chips">'+(dictChips||'<span style="color:var(--sub);font-size:12px">매칭 없음</span>')+'</div>'+
@@ -500,6 +620,9 @@ function renderDetail(){
     '<div class="chips">'+(aiChips||'<span style="color:var(--sub);font-size:12px">추천 없음</span>')+'</div>'+
     '</div>',
     '두 방식 비교: 초록=소개글 단어 매칭 / 보라=Claude 맥락 추천 · 동의어는 키워드명으로 표시(예: 라스트마일→배송/배달) · 어드민엔 적합한 것만');
+
+  // 7. 대표자 · SNS (위에서 계산한 repField 삽입)
+  h+=repField;
 
   // 10. 기업대표 연락처 (유선만, 010 제외)
   var phone = c.phone||'';
@@ -568,29 +691,31 @@ function renderDetail(){
   var allNews = dom.map(function(n){n._scope='국내';return n;}).concat(frn.map(function(n){n._scope='국외';return n;}));
   var newsInner;
   if(allNews.length){
-    var rows = allNews.map(function(n){
+    var rows = allNews.map(function(n,ni){
       var scope = n._scope||'';
       var date = n.date||'';
       var press = n.press||'';
       var title = n.title||'';
       var url = n.url||'';
       var scopeColor = scope==='국내' ? 'color:#1d7a4d' : 'color:#b45309';
-      // 일괄복사: 제목[탭]URL[탭]언론사[탭]보도일 (어드민 양식 순서)
-      var rowCopy = [title,url,press,date].join(String.fromCharCode(9));
+      // 일괄복사: CORP_ID[탭]제목[탭]URL[탭]언론사[탭]보도일[탭]노출여부1 (뉴스 엑셀 양식 순서)
+      var rowCopy = [(c.cp&&c.cp!=='CP미정')?c.cp:'',title,url,press,date,'1'].join(String.fromCharCode(9));
       return '<tr style="border-bottom:1px solid var(--line)">'+
         '<td style="padding:6px 8px;white-space:nowrap;font-weight:600;'+scopeColor+'">'+scope+'</td>'+
         '<td style="padding:6px 8px;font-size:13px">'+title+'</td>'+
         '<td style="padding:6px 8px;white-space:nowrap">'+(url?'<a href="'+url+'" target="_blank" rel="noopener" style="font-size:12px">열기</a>':'')+'</td>'+
         '<td style="padding:6px 8px;white-space:nowrap;font-size:12px">'+press+'</td>'+
         '<td style="padding:6px 8px;white-space:nowrap;color:var(--sub);font-size:12px">'+date+'</td>'+
-        '<td style="padding:6px 8px;white-space:nowrap"><button class="sm ghost" data-copy="'+esc(rowCopy)+'" onclick="cpBtn(this)">복사</button></td>'+
+        '<td style="padding:6px 8px;white-space:nowrap"><button class="sm ghost" data-live="news:'+ni+'" data-copy="'+esc(rowCopy)+'" onclick="cpBtn(this)">복사</button></td>'+
         '</tr>';
     }).join('');
-    // 전체 일괄복사: 각 뉴스를 줄바꿈으로, 각 줄은 제목[탭]URL[탭]언론사[탭]보도일
+    // 전체 일괄복사: 각 뉴스를 줄바꿈으로, 각 줄은 CORP_ID[탭]제목[탭]URL[탭]언론사[탭]보도일[탭]노출여부1
+    var newsCp = (c.cp&&c.cp!=='CP미정')?c.cp:'';
     var allCopy = allNews.map(function(n){
-      return [n.title||'',n.url||'',n.press||'',n.date||''].join(String.fromCharCode(9));
+      return [newsCp,n.title||'',n.url||'',n.press||'',n.date||'','1'].join(String.fromCharCode(9));
     }).join(String.fromCharCode(10));
-    newsInner = '<div style="margin-bottom:8px"><button class="sm" data-copy="'+esc(allCopy)+'" onclick="cpBtn(this)">전체 일괄 복사 (엑셀 양식: 제목·URL·언론사·보도일)</button></div>'+
+    newsInner = '<div style="margin-bottom:8px"><button class="sm" data-live="news:all" data-copy="'+esc(allCopy)+'" onclick="cpBtn(this)">전체 일괄 복사 (엑셀 양식: CORP_ID·제목·URL·언론사·보도일·노출여부)</button>'+
+      '<span id="cpwarn" style="margin-left:8px;font-size:12px;color:var(--warn);display:'+(newsCp?'none':'inline')+'">⚠ CORP_ID 미입력 — 맨 위 입력칸에 넣으면 복사에 자동 포함(지금은 빈 칸으로 복사됨)</span>'+'</div>'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
       '<thead><tr style="border-bottom:2px solid var(--line);text-align:left;color:var(--sub);font-size:11px">'+
       '<th style="padding:4px 8px">구분</th><th style="padding:4px 8px">제목</th><th style="padding:4px 8px">URL</th><th style="padding:4px 8px">언론사</th><th style="padding:4px 8px">보도일</th><th style="padding:4px 8px">복사</th>'+
@@ -599,14 +724,28 @@ function renderDetail(){
     newsInner = '<span style="color:var(--sub)">— 뉴스 없음</span>';
   }
   h+=field('11','기업뉴스',allNews.length?'ok':'idle', newsInner,
-    '국내 최대 5건 + 국외 최대 1건 · 중복 제외 · 일괄복사는 제목·URL·언론사·보도일 순(엑셀 붙여넣기용)');
+    '국내 최대 5건 + 국외 최대 1건 · 중복 제외 · 복사는 CORP_ID·제목·URL·언론사·보도일·노출여부(1) 순 — 뉴스 엑셀 양식 그대로');
 
   $('#detail').innerHTML=h;
-  if(c.logo) loadLogo(active);
+  // 이미 로드된 로고는 다시 받지 않고 저장된 썸네일을 그대로 사용
+  if(c.logo){
+    if(c.logoStatus==='ok'&&c.logoData){
+      var th=$('#thumb'); if(th) th.innerHTML='<img src="'+c.logoData+'"><div class="ring"></div>';
+    } else if(c.logoStatus!=='err'){ loadLogo(active); }
+    else { var te=$('#thumb'); if(te) te.innerHTML='<div class="st" style="color:var(--err)">실패<br>수동캡처</div><div class="ring"></div>'; }
+  }
 }
 
 window.upd=(i,f,v)=>{companies[i][f]=v;};
-window.updIntro=(i,v)=>{const c=companies[i];c.intro=v;const src=c.refIntro||v;c.kws=matchKeywords(src);c.cats=recommendCats(src);renderDetail();renderList();};
+window.updIntro=(i,v)=>{
+  const c=companies[i]; c.intro=v;
+  const src=c.refIntro||v; c.kws=matchKeywords(src); c.cats=recommendCats(src);
+  renderList();
+  // 소개글 복사는 클릭 시점에 최신 값(data-live)을 쓰므로 재렌더 불필요.
+  // 참고소개가 없어 카테고리·키워드 추천이 소개글에 의존하는 경우,
+  // 또는 소개글이 새로 생겨 복사버튼이 아직 없는 경우에만 클릭이 끝난 뒤 갱신.
+  if(!c.refIntro || (v && !document.querySelector('[data-live="intro"]'))) setTimeout(renderDetail,300);
+};
 
 window.cp=(t)=>navigator.clipboard.writeText(t);
 window.toggleCat=(i,ci)=>{
@@ -616,6 +755,11 @@ window.toggleCat=(i,ci)=>{
   else{if(c.cats.length>=3){alert('카테고리는 최대 3개까지입니다.');return;}c.cats.push(cat);}
   renderDetail();renderList();
 };
+function logoNoteHtml(c){
+  if(c.logoStatus!=='ok') return '';
+  if(c.logoLowRes) return '<div style="margin-top:6px;font-size:12px;color:var(--err);font-weight:600">⚠ 화질미달 — 원본 '+c.logoW+'×'+c.logoH+'px (256 확대 시 흐려짐, 고화질 로고 별도 확보 권장)</div>';
+  return '<div style="margin-top:6px;font-size:12px;color:var(--ok)">원본 '+c.logoW+'×'+c.logoH+'px · 화질 양호</div>';
+}
 window.loadLogo=async(i)=>{
   const c=companies[i];if(!c.logo)return;
   // 로딩 시작 시점의 기업 인덱스를 기억 (비동기 완료 후 화면이 바뀌었을 수 있음)
@@ -625,10 +769,13 @@ window.loadLogo=async(i)=>{
     // 화질 판정: 짧은 변이 200px 미만이면 256 확대 시 깨짐
     c.logoLowRes = Math.min(img.width,img.height) < 200;
     c.logoData=resize(img,14);c.logoStatus='ok';
-    // 완료 시점에도 여전히 같은 기업이 선택돼 있을 때만 화면 갱신
+    // 완료 시점에도 여전히 같은 기업이 선택돼 있을 때만 화면 갱신.
+    // ⚠ 여기서 renderDetail()을 부르면 안 됨: renderDetail이 다시 loadLogo를 부르므로
+    //   로고가 정상 로드되는 기업에서 무한 재렌더 루프(깜빡임·모든 클릭 무효)가 발생한다.
+    //   → 썸네일과 화질 안내문만 부분 갱신한다.
     if(i===active){
       if($('#thumb'))$('#thumb').innerHTML='<img src="'+c.logoData+'"><div class="ring"></div>';
-      renderDetail();
+      var ln=$('#logonote'); if(ln) ln.innerHTML=logoNoteHtml(c);
     }
   }catch(e){c.logoStatus='err';if(i===active && $('#thumb'))$('#thumb').innerHTML='<div class="st" style="color:var(--err)">실패<br>수동캡처</div><div class="ring"></div>';}
 };
@@ -639,6 +786,46 @@ $('#load').addEventListener('click',()=>{
   active=0;renderList();renderDetail();
 });
 $('#clr').addEventListener('click',()=>{$('#input').value='';companies=[];active=-1;renderList();$('#detail').innerHTML='<div class="empty">초기화됨</div>';});
+
+// CORP_ID 입력 (어드민 등록 후 검수자가 직접 입력 — 뉴스 복사 등에 자동 포함)
+window.updCp=(i,v)=>{
+  // 숫자만 받아 CP + 8자리 형식으로 저장 (예: 40459 → CP00040459)
+  var digits=(v||'').replace(/\D/g,'');
+  companies[i].cp = digits ? ('CP'+digits.padStart(8,'0')) : '';
+  renderList();
+  // 화면 전체를 다시 그리지 않고 배지·경고문만 갱신 (입력칸과 버튼을 파괴하지 않기 위함)
+  var has=!!companies[i].cp;
+  var b=document.getElementById('cpbadge');
+  if(b){ b.className='badge '+(has?'b-ok':'b-idle'); b.textContent=has?('입력됨 · '+companies[i].cp):'미입력 — 뉴스 복사에 포함됨'; }
+  var w=document.getElementById('cpwarn');
+  if(w){ w.style.display=has?'none':'inline'; }
+};
+
+// JSON 파일 열기 / 드래그&드랍 (여러 파일이면 자동으로 합쳐서 로드)
+function loadJsonFiles(files){
+  var list=Array.prototype.slice.call(files||[]).filter(function(f){return /\.json$/i.test(f.name)||f.type==='application/json';});
+  if(!list.length){alert('JSON 파일(.json)만 불러올 수 있습니다.');return;}
+  var arrs=[],pending=list.length,errs=[];
+  list.forEach(function(f){
+    var r=new FileReader();
+    r.onload=function(){
+      try{var d=JSON.parse(r.result);arrs=arrs.concat(Array.isArray(d)?d:[d]);}
+      catch(e){errs.push(f.name);}
+      if(--pending===0){
+        if(errs.length)alert('JSON 형식이 아니어서 건너뛴 파일: '+errs.join(', '));
+        if(arrs.length){$('#input').value=JSON.stringify(arrs);$('#load').click();}
+      }
+    };
+    r.readAsText(f,'utf-8');
+  });
+}
+$('#jsonfile').addEventListener('change',function(){loadJsonFiles(this.files);this.value='';});
+(function(){
+  var ta=$('#input');
+  ['dragover','dragenter'].forEach(function(ev){ta.addEventListener(ev,function(e){e.preventDefault();ta.style.outline='2px dashed #1d7a4d';});});
+  ta.addEventListener('dragleave',function(){ta.style.outline='';});
+  ta.addEventListener('drop',function(e){e.preventDefault();ta.style.outline='';if(e.dataTransfer&&e.dataTransfer.files.length)loadJsonFiles(e.dataTransfer.files);});
+})();
 </script>
 </body>
 </html>
