@@ -9,6 +9,8 @@
     --ink:#1a1a1a; --sub:#6b6b6b; --line:#e4e3e0; --bg:#f7f6f3; --card:#fff;
     --ok:#1d7a4d; --okbg:#e8f4ee; --warn:#b45309; --warnbg:#fdf3e7;
     --err:#b42318; --errbg:#fdecea; --accent:#2d5bff; --accentbg:#eef1ff;
+    /* 왼쪽 목록 점 전용 색 — 본문용 --warn(갈색 계열)·--err는 8px 점에서 구분이 안 돼 선명한 노랑·빨강을 따로 둔다 */
+    --dot-ok:#1d9a5a; --dot-warn:#f5b400; --dot-err:#e5202b;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Malgun Gothic",sans-serif;
@@ -24,8 +26,8 @@
   .company.active{background:var(--accentbg); border-left:3px solid var(--accent); padding-left:13px}
   .company .nm{font-weight:600; font-size:13px}
   .company .cp{font-size:11px; color:var(--sub)}
-  .company .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-  .d-ok{background:var(--ok)} .d-warn{background:var(--warn)} .d-err{background:var(--err)} .d-idle{background:#ccc}
+  .company .dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 1.5px #fff, 0 0 0 2.5px rgba(0,0,0,.18)}
+  .d-ok{background:var(--dot-ok)} .d-warn{background:var(--dot-warn)} .d-err{background:var(--dot-err)} .d-idle{background:#c8c8c8}
   .main{flex:1; padding:20px 24px; overflow-y:auto}
   .addbar{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:16px}
   .addbar textarea{width:100%; min-height:70px; border:1px solid var(--line); border-radius:8px; padding:10px;
@@ -98,9 +100,9 @@
       <div style="margin-top:6px;font-size:11px;color:var(--sub)">JSON 파일을 위 입력창에 끌어다 놓아도 됩니다 (여러 파일 동시 가능 — 자동으로 합쳐서 불러옴)</div>
       <div style="margin-top:8px;padding:8px 12px;background:#f7f8fa;border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.7">
         <b>왼쪽 목록 점 색상 기준</b> (홈페이지 기준 아님) —
-        <span style="color:var(--ok);font-weight:700">● 초록</span> 사업자번호+양식 소개글까지 확보 (조사 성공) ·
-        <span style="color:var(--warn);font-weight:700">● 노랑</span> 사업자번호는 있으나 소개글 없음 (정보를 거의 못 찾아 최소 등록한 기업 — 직접 조사 필요) ·
-        <span style="color:var(--err);font-weight:700">● 빨강</span> 사업자번호·홈페이지 모두 없음
+        <span style="color:var(--dot-ok);font-weight:700;font-size:14px">●</span> <b>초록</b> 사업자번호+양식 소개글까지 확보 (조사 성공) ·
+        <span style="color:var(--dot-warn);font-weight:700;font-size:14px">●</span> <b>노랑</b> 사업자번호는 있으나 소개글 없음 (정보를 거의 못 찾아 최소 등록한 기업 — 직접 조사 필요) ·
+        <span style="color:var(--dot-err);font-weight:700;font-size:14px">●</span> <b>빨강</b> 사업자번호·홈페이지 모두 없음
       </div>
     </div>
     <div id="detail"><div class="empty">왼쪽에서 기업을 선택하거나, 위에 데이터를 붙여넣고 "기업별 수집 데이터 확인하기"를 누르세요.</div></div>
