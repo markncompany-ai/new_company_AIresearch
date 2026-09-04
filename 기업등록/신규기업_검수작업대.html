@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>기업 등록 검수 작업대</title>
+<title>신규 기업 검수 작업대</title>
 <style>
   :root{
     --ink:#191c21; --sub:#6b7280; --line:#e5e7eb; --line2:#eef0f3; --bg:#f4f5f7; --card:#fff;
@@ -106,14 +106,21 @@
 
   /* ── 기업 헤더 (스크롤 시 상단 고정) ── */
   /* 스크롤 영역 맨 위(top:0)에 딱 붙는다 — .main에 위쪽 padding을 두면 그 틈으로 카드가 비치니 .main padding-top은 항상 0 */
-  /* 헤더는 예전처럼 배경색 띠 — 색 띠·카드 테두리 없이, 아래쪽 경계선과 옅은 그림자로만 구분 */
-  .co-head{display:flex;align-items:center;gap:14px;margin:0 0 14px;position:sticky;top:0;z-index:10;background:var(--bg);padding:12px 0 10px;
-    border-bottom:2px solid #d5d8de; box-shadow:0 10px 12px -12px rgba(16,24,40,.35)}
-  .co-head h2{font-size:22px;font-weight:800;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:1;min-width:0;max-width:46%}
+  /* 기업 고정 헤더 — #cohead가 .main 양옆 padding까지 덮어 본문 폭 전체를 흰 띠로 채우고, 안쪽 .co-head는 카드와 같은 960px 정렬 */
+  .main > #cohead{max-width:none;margin:0 -32px 14px;padding:0 32px;position:sticky;top:0;z-index:10;background:#fff;
+    border-bottom:1px solid var(--line);box-shadow:0 8px 14px -10px rgba(16,24,40,.28)}
+  .main > #cohead:empty{display:none}
+  .co-head{max-width:960px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:11px 0}
+  .co-head .nav{display:inline-flex;align-items:center;gap:2px;flex-shrink:0;margin-right:2px}
+  .co-head .nav button{padding:3px 9px;font-size:15px;line-height:1;border-radius:6px}
+  .co-head .nav .pos{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;min-width:52px;text-align:center}
+  .co-head .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px #fff,0 0 0 3px rgba(0,0,0,.12)}
+  .co-head h2{font-size:21px;font-weight:800;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:1;min-width:0;max-width:40%}
   .co-head > span{white-space:nowrap;flex-shrink:0}
   .co-head .badge{white-space:nowrap}
   .co-head .cp{color:var(--sub);font-size:13px}
   .co-head input{font-variant-numeric:tabular-nums}
+  @media (max-width:900px){ .main > #cohead{margin-left:-18px;margin-right:-18px;padding-left:18px;padding-right:18px} }
 
   /* ── 항목 카드 ── */
   .field{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 18px 14px 20px;margin-bottom:12px;box-shadow:var(--shadow);position:relative;overflow:hidden}
@@ -158,7 +165,7 @@
 <body>
 <div id="gtoast" class="hidden"><span id="gtoast-msg"></span></div>
 <div class="top">
-  <h1>기업 등록 검수 작업대</h1>
+  <h1>신규 기업 검수 작업대</h1>
   <span class="desc">조사 JSON을 기업별로 검수 · 수정 · 어드민에 복사</span>
   <span id="summary"></span>
   <span class="rule">확인된 정보만 · 추측·생성 금지 · 못 찾으면 비움</span>
@@ -198,6 +205,7 @@
         </div>
       </div>
     </div>
+    <div id="cohead"></div>
     <div id="detail"><div class="empty">JSON을 불러오면 기업별 검수 카드가 여기에 표시됩니다.<br><span style="font-size:12px">카드 왼쪽 색 띠와 배지가 검수 우선순위입니다 — 초록은 그대로, 노랑은 훑어보기, 빨강은 반드시 직접 확인</span></div></div>
   </div>
 </div>
@@ -697,18 +705,26 @@ function cpBtn(el){
 // ── 토스트 (인라인 번역 기능은 2026-09-04 제거 — 영문 재번역은 claude.ai 아티팩트로) ──
 function showToast(msg){ var el=document.getElementById('gtoast'); if(!el)return; document.getElementById('gtoast-msg').textContent=msg; el.classList.remove('hidden'); if(window.__toastT)clearTimeout(window.__toastT); window.__toastT=setTimeout(function(){el.classList.add('hidden');},5000); }
 
+// 이전/다음 기업으로 이동 (목록 전체 순서 기준)
+window.goCo=function(delta){ if(!companies.length) return; var n=companies.length; active=((active+delta)%n+n)%n; renderList(); renderDetail(); $('#main').scrollTop=0; };
 function renderDetail(){
-  if(active<0||!companies[active]){$('#detail').innerHTML='<div class="empty">기업을 선택하세요.</div>';return;}
+  if(active<0||!companies[active]){$('#cohead').innerHTML='';$('#detail').innerHTML='<div class="empty">기업을 선택하세요.</div>';return;}
   const c=companies[active];
   const cpVal = (c.cp && c.cp!=='CP미정') ? c.cp : '';
-  let h='<div class="co-head"><h2>'+c.name+'</h2>'+
+  const conf=confOf(c);
+  // 기업 헤더 — #detail 밖 #cohead에 넣어 본문 폭 전체(양옆 꽉 차게)로 상단 고정
+  var head='<div class="co-head">'+
+    '<div class="nav"><button class="ghost sm" onclick="goCo(-1)" title="이전 기업">‹</button><span class="pos">'+(active+1)+' / '+companies.length+'</span><button class="ghost sm" onclick="goCo(1)" title="다음 기업">›</button></div>'+
+    '<span class="dot d-'+conf+'" title="'+({ok:'사업자번호+소개글 확보',warn:'사업자번호만 있음',err:'사업자번호·홈페이지 없음'}[conf])+'"></span>'+
+    '<h2 title="'+esc(c.name)+'">'+c.name+'</h2>'+
     '<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">CORP_ID '+
-    '<input type="text" inputmode="numeric" placeholder="숫자만 입력 (예: 40459)" value="'+esc((cpVal||'').replace(/\D/g,'').replace(/^0+/,''))+'" style="width:160px;font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onchange="updCp('+active+',this.value)">'+
+    '<input type="text" inputmode="numeric" placeholder="숫자만 입력 (예: 40459)" value="'+esc((cpVal||'').replace(/\D/g,'').replace(/^0+/,''))+'" style="width:150px;font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onchange="updCp('+active+',this.value)">'+
     (cpVal?'<span id="cpbadge" class="badge b-ok">입력됨 · '+cpVal+'</span>':'<span id="cpbadge" class="badge b-idle" title="어드민에서 발급받은 CORP_ID를 넣으면 뉴스 일괄복사에 자동 포함됩니다">미입력</span>')+'</span>'+
     (isDone(c)
       ? '<button class="sm donebtn on" onclick="toggleDone('+active+')" title="'+DONE[doneKey(c)]+' 완료 처리됨 — 누르면 되돌립니다">✓ 완료됨 · 되돌리기</button>'
       : '<button class="sm donebtn" onclick="toggleDone('+active+')" title="어드민 입력까지 끝났으면 누르세요 — 목록에 완료 태그가 붙고 다음 미완료 기업으로 이동">작업 완료</button>')+
     '</div>';
+  let h='';
 
   // 0. 조사자 검수 노트 (JSON의 notes 배열 — 대표자 불일치, 동명회사 제외 이력 등)
   if(c.notes && c.notes.length){
@@ -965,6 +981,7 @@ function renderDetail(){
   h+=field('11','기업뉴스',allNews.length?'ok':'idle', newsInner,
     '국내 최대 5건 + 국외 최대 1건 · 중복 제외 · 복사는 CORP_ID·제목·URL·언론사·보도일·노출여부(1) 순 — 뉴스 엑셀 양식 그대로');
 
+  $('#cohead').innerHTML=head;
   $('#detail').innerHTML=h;
   // 이미 로드된 로고는 다시 받지 않고 저장된 썸네일을 그대로 사용
   if(c.logo){
@@ -1069,7 +1086,7 @@ $('#load').addEventListener('click',()=>{
   companies=parsed; active=0; listQuery=''; var qi=$('#q'); if(qi) qi.value=''; setFilter('all');
   renderDetail();setAddbar(true);$('#main').scrollTop=0;
 });
-$('#clr').addEventListener('click',()=>{$('#input').value='';companies=[];active=-1;renderList();setAddbar(false);$('#detail').innerHTML='<div class="empty">초기화됨 — JSON을 다시 불러오세요.</div>';});
+$('#clr').addEventListener('click',()=>{$('#input').value='';companies=[];active=-1;renderList();setAddbar(false);$('#cohead').innerHTML='';$('#detail').innerHTML='<div class="empty">초기화됨 — JSON을 다시 불러오세요.</div>';});
 
 // CORP_ID 입력 (어드민 등록 후 검수자가 직접 입력 — 뉴스 복사 등에 자동 포함)
 window.updCp=(i,v)=>{
