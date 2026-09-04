@@ -50,6 +50,18 @@
   .side .legend b{color:var(--ink)}
   .side .legend i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:-1px;box-shadow:0 0 0 1.5px #fff,0 0 0 2.5px rgba(0,0,0,.1)}
   .side .empty-list{padding:26px 18px; font-size:12.5px; color:var(--sub); line-height:1.7}
+  /* 완료 필터 (사이드바 상단) */
+  .filt{display:flex;gap:4px;padding:0 12px 10px}
+  .filt button{flex:1;padding:5px 6px;font-size:11.5px;border-radius:7px;background:#fff;color:var(--sub);border:1px solid var(--line);font-weight:600}
+  .filt button:hover{background:#f8f9fc;color:var(--ink)}
+  .filt button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .filt button.on:hover{background:#000}
+  .company .tag{font-size:10px;font-weight:800;padding:1px 6px;border-radius:5px;background:var(--okbg);color:var(--ok);flex-shrink:0;letter-spacing:.02em}
+  .company.done .nm{color:var(--sub);text-decoration:line-through;text-decoration-color:#c7cdd6}
+  .company.done .dot{opacity:.45}
+  .co-head .donebtn{margin-left:auto}
+  .co-head .donebtn.on{background:var(--okbg);color:var(--ok);border:1px solid #bbf7d0}
+  .co-head .donebtn.on:hover{background:#dcfce7}
 
   .main{flex:1; padding:0 32px 60px; overflow-y:auto; min-width:0}
   .main > *{max-width:960px; margin-left:auto; margin-right:auto}
@@ -142,6 +154,11 @@
 <div class="wrap">
   <div class="side">
     <h2>기업 목록</h2>
+    <div class="filt" id="filt">
+      <button class="on" onclick="setFilter('all')" data-f="all">전체</button>
+      <button onclick="setFilter('todo')" data-f="todo">미완료</button>
+      <button onclick="setFilter('done')" data-f="done">완료</button>
+    </div>
     <div id="colist"><div class="empty-list">아직 불러온 기업이 없습니다.<br>오른쪽에서 JSON 파일을 열거나 붙여넣으세요.</div></div>
     <div class="legend">
       <b>점 색상</b> — 조사 결과 확보 수준<br>
@@ -511,27 +528,65 @@ function confOf(c){
   return 'ok';
 }
 
+// ── 작업 완료 상태 — 브라우저 localStorage에 저장해 며칠에 걸쳐 작업해도 유지 (키: 기업ID → 사업자번호 → 기업명) ──
+var DONE_KEY='wb_done_v1';
+function loadDone(){ try{ return JSON.parse(localStorage.getItem(DONE_KEY)||'{}'); }catch(e){ return {}; } }
+function saveDone(m){ try{ localStorage.setItem(DONE_KEY, JSON.stringify(m)); }catch(e){} }
+var DONE=loadDone();
+function doneKey(c){ return (c.cp&&c.cp!=='CP미정') ? c.cp : (c.bizno ? 'biz:'+c.bizno : 'nm:'+(c.name||'')); }
+function isDone(c){ return !!DONE[doneKey(c)]; }
+var listFilter='all';
+window.setFilter=function(f){ listFilter=f; renderList(); };
+window.toggleDone=function(i){
+  var c=companies[i]; if(!c) return;
+  var k=doneKey(c);
+  if(DONE[k]){ delete DONE[k]; saveDone(DONE); renderList(); renderDetail(); return; }
+  DONE[k]=new Date().toISOString().slice(0,10); saveDone(DONE);
+  // 다음 미완료 기업으로 자동 이동 (없으면 현재 유지)
+  var next=-1;
+  for(var j=i+1;j<companies.length;j++){ if(!isDone(companies[j])){ next=j; break; } }
+  if(next<0) for(var j2=0;j2<i;j2++){ if(!isDone(companies[j2])){ next=j2; break; } }
+  if(next>=0){ active=next; showToast('완료 처리 → 다음 미완료 기업으로 이동'); } else { showToast('완료 처리 — 남은 미완료 기업이 없습니다 🎉'); }
+  renderList(); renderDetail(); $('#main').scrollTop=0;
+};
+
 function renderList(){
   const el=$('#colist'); el.innerHTML='';
   if(!companies.length){
     el.innerHTML='<div class="empty-list">아직 불러온 기업이 없습니다.<br>오른쪽에서 JSON 파일을 열거나 붙여넣으세요.</div>';
   }
-  var cnt={ok:0,warn:0,err:0};
+  var cnt={ok:0,warn:0,err:0}, doneCnt=0, shown=0;
   companies.forEach((c,i)=>{
     const conf=confOf(c); cnt[conf]=(cnt[conf]||0)+1;
+    const done=isDone(c); if(done) doneCnt++;
+    if(listFilter==='todo'&&done) return;
+    if(listFilter==='done'&&!done) return;
+    shown++;
     const d=document.createElement('div');
-    d.className='company'+(i===active?' active':'');
+    d.className='company'+(i===active?' active':'')+(done?' done':'');
     d.onclick=()=>{active=i;renderList();renderDetail();$('#main').scrollTop=0;};
     const cpShow = (c.cp && c.cp!=='CP미정') ? c.cp : 'CP 미확인';
-    d.innerHTML='<span class="dot d-'+conf+'" title="'+({ok:'사업자번호+소개글 확보',warn:'사업자번호만 있음',err:'사업자번호·홈페이지 없음'}[conf])+'"></span><div><div class="nm" title="'+esc(c.name)+'">'+c.name+'</div><div class="cp">'+cpShow+'</div></div>';
+    d.innerHTML='<span class="dot d-'+conf+'" title="'+({ok:'사업자번호+소개글 확보',warn:'사업자번호만 있음',err:'사업자번호·홈페이지 없음'}[conf])+'"></span>'+
+      '<div><div class="nm" title="'+esc(c.name)+'">'+c.name+'</div><div class="cp">'+cpShow+(done?' · '+DONE[doneKey(c)]:'')+'</div></div>'+
+      (done?'<span class="tag">완료</span>':'');
     el.appendChild(d);
   });
-  // 상단 요약: 기업 수 + 색상별 개수
+  if(companies.length&&!shown){
+    el.innerHTML='<div class="empty-list">'+(listFilter==='done'?'완료한 기업이 아직 없습니다.':'미완료 기업이 없습니다 — 전부 끝났어요 🎉')+'</div>';
+  }
+  // 필터 버튼 상태 + 개수
+  var todoCnt=companies.length-doneCnt;
+  document.querySelectorAll('#filt button').forEach(function(b){
+    var f=b.dataset.f; b.className=(f===listFilter?'on':'');
+    b.textContent = f==='all' ? '전체 '+companies.length : f==='todo' ? '미완료 '+todoCnt : '완료 '+doneCnt;
+  });
+  // 상단 요약: 기업 수 + 완료 진행 + 색상별 개수
   var s=$('#summary');
   if(s){
     if(companies.length){
       s.className='on';
       s.innerHTML='<span class="cnt">'+companies.length+'개 기업</span>'+
+        '<span class="cnt" style="color:var(--ok)">✓ '+doneCnt+'/'+companies.length+' 완료</span>'+
         '<span class="cnt"><i style="background:var(--dot-ok)"></i>'+cnt.ok+'</span>'+
         '<span class="cnt"><i style="background:var(--dot-warn)"></i>'+cnt.warn+'</span>'+
         '<span class="cnt"><i style="background:var(--dot-err)"></i>'+cnt.err+'</span>';
@@ -616,7 +671,11 @@ function renderDetail(){
   let h='<div class="co-head"><h2>'+c.name+'</h2>'+
     '<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">CORP_ID '+
     '<input type="text" inputmode="numeric" placeholder="숫자만 입력 (예: 40459)" value="'+esc((cpVal||'').replace(/\D/g,'').replace(/^0+/,''))+'" style="width:160px;font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onchange="updCp('+active+',this.value)">'+
-    (cpVal?'<span id="cpbadge" class="badge b-ok">입력됨 · '+cpVal+'</span>':'<span id="cpbadge" class="badge b-idle">미입력 — 뉴스 복사에 포함됨</span>')+'</span></div>';
+    (cpVal?'<span id="cpbadge" class="badge b-ok">입력됨 · '+cpVal+'</span>':'<span id="cpbadge" class="badge b-idle">미입력 — 뉴스 복사에 포함됨</span>')+'</span>'+
+    (isDone(c)
+      ? '<button class="sm donebtn on" onclick="toggleDone('+active+')" title="'+DONE[doneKey(c)]+' 완료 처리됨 — 누르면 되돌립니다">✓ 완료됨 · 되돌리기</button>'
+      : '<button class="sm donebtn" onclick="toggleDone('+active+')" title="어드민 입력까지 끝났으면 누르세요 — 목록에 완료 태그가 붙고 다음 미완료 기업으로 이동">작업 완료</button>')+
+    '</div>';
 
   // 0. 조사자 검수 노트 (JSON의 notes 배열 — 대표자 불일치, 동명회사 제외 이력 등)
   if(c.notes && c.notes.length){
