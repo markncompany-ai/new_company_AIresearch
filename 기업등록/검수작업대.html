@@ -560,17 +560,31 @@ function renderDetail(){
   h+=field('3','기업소개 (영문)', teResult?'ok':'idle', teInner,
     '조사 단계에서 영문 소개가 미리 담겨 옴 — 그대로 복사 사용 · 국문을 수정한 경우에만 아티팩트로 재번역 · 작은따옴표 속 국문 서비스명은 공식 영문명 확인 후 교체');
 
-  // 4. 홈페이지 · 로고
+  // 4. 홈페이지
+  h+=field('4','홈페이지',c.homepage?'ok':'err',
+    (c.homepage?linkVal(c.homepage):'<span style="color:var(--err)">홈페이지 미확정 — 못 찾음</span>'),
+    '기업 홈페이지(서비스 사이트 아님) · 복사해서 어드민 입력 · 서비스 URL은 10번 서비스 항목에 따로 있음');
+
+  // 4-1. 로고 (썸네일 · 원본 URL · 256 다운로드 · 화질 안내 · 리사이저/구글검색)
+  var LOGO_RESIZER_URL = '';  // 로고 리사이저 링크 확정되면 여기에 넣는다 (비어 있으면 버튼이 '준비 중'으로 표시)
   var logoNote = logoNoteHtml(c);
-  var gSearch = 'https://www.google.com/search?tbm=isch&q='+encodeURIComponent(c.name.replace(/^\(주\)/,'')+' 로고');
-  var gBtn = '<a href="'+gSearch+'" target="_blank" rel="noopener" class="sm ghost" style="display:inline-block;margin-top:6px;text-decoration:none;border:1px solid var(--line);border-radius:7px;padding:4px 10px;font-size:12px">🔍 구글에서 "'+c.name.replace(/^\(주\)/,'')+' 로고" 이미지 검색</a>';
-  h+=field('4','홈페이지 · 로고',c.homepage?'ok':'err',
-    '<div class="logo-wrap"><div class="thumb" id="thumb"><div class="ring"></div></div><div style="flex:1">'+
-    (c.homepage?linkVal(c.homepage):'<span style="color:var(--err)">홈페이지 미확정 — 못 찾음</span>')+
-    (c.logo?'<div style="margin-top:6px"><button class="sm" onclick="dlLogo('+active+')" id="dlbtn">로고 256 다운로드</button></div>':'<div style="margin-top:6px;color:var(--sub);font-size:12px">로고 주소 미확보</div>')+
+  var coName = c.name.replace(/^\(주\)/,'');
+  var gSearch = 'https://www.google.com/search?tbm=isch&q='+encodeURIComponent(coName+' 로고');
+  var linkBtnStyle = 'display:inline-block;text-decoration:none;border:1px solid var(--line);border-radius:7px;padding:4px 10px;font-size:12px;color:var(--ink);background:#fff';
+  var gBtn = '<a href="'+gSearch+'" target="_blank" rel="noopener" style="'+linkBtnStyle+'">🔍 구글 이미지에서 "'+esc(coName)+' 로고" 검색</a>';
+  var rzBtn = LOGO_RESIZER_URL
+    ? '<a href="'+LOGO_RESIZER_URL+'" target="_blank" rel="noopener" style="'+linkBtnStyle+';background:var(--accent);color:#fff;border-color:var(--accent)">🖼 로고 리사이저 열기 ↗</a>'
+    : '<span style="'+linkBtnStyle+';color:var(--sub);background:var(--bg)" title="링크 확정 후 연결 예정">🖼 로고 리사이저 (준비 중)</span>';
+  var logoRight =
+    (c.logo
+      ? '<div style="font-size:12px;color:var(--sub);margin-bottom:2px">원본 이미지 주소</div>'+linkVal(c.logo)+
+        '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><button class="sm" onclick="dlLogo('+active+')" id="dlbtn">⬇ 로고 256 다운로드</button></div>'
+      : '<div style="color:var(--err);font-size:13px">로고 주소 미확보</div><div style="font-size:12px;color:var(--sub);margin-top:2px">홈페이지에서 못 찾음 — 아래 구글 검색으로 확보 후 리사이저로 256px 변환</div>')+
     '<div id="logonote">'+logoNote+'</div>'+
-    '<div>'+gBtn+'</div>'+
-    '</div></div>','점선 원 = 프론트 노출 영역 · 원본이 200px 미만이면 화질미달 표시 · 로고가 없거나 화질미달이면 구글 이미지 검색으로 고화질 확보');
+    '<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">'+rzBtn+gBtn+'</div>';
+  h+=field('4-1','로고',c.logo?'ok':'warn',
+    '<div class="logo-wrap"><div class="thumb" id="thumb"><div class="ring"></div></div><div style="flex:1;min-width:0">'+logoRight+'</div></div>',
+    '점선 원 = 프론트 노출 영역(원형 크롭) · 256×256, 여백 두고 정중앙 · 원본 200px 미만이면 화질미달 → 구글 검색으로 고화질 확보');
 
   // 5. 카테고리
   let chips=CATEGORIES.map((cat,ci)=>{
