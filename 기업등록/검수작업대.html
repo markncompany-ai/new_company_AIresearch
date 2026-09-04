@@ -50,6 +50,13 @@
   .side .legend b{color:var(--ink)}
   .side .legend i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:-1px;box-shadow:0 0 0 1.5px #fff,0 0 0 2.5px rgba(0,0,0,.1)}
   .side .empty-list{padding:26px 18px; font-size:12.5px; color:var(--sub); line-height:1.7}
+  /* 검색 (사이드바 상단) */
+  .srch{position:relative;padding:0 12px 8px}
+  .srch input{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 28px 7px 10px;font-size:12.5px;background:#fbfbfc}
+  .srch input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accentbg);background:#fff}
+  .srch .x{position:absolute;right:16px;top:3px;background:none;color:var(--sub);font-size:16px;padding:2px 6px;display:none}
+  .srch .x:hover{background:none;color:var(--ink)}
+  .srch.has .x{display:block}
   /* 완료 필터 (사이드바 상단) */
   .filt{display:flex;gap:4px;padding:0 12px 10px}
   .filt button{flex:1;padding:5px 6px;font-size:11.5px;border-radius:7px;background:#fff;color:var(--sub);border:1px solid var(--line);font-weight:600}
@@ -98,8 +105,13 @@
   .empty{text-align:center;color:var(--sub);padding:70px 20px;background:var(--card);border:1px dashed var(--line);border-radius:var(--radius);font-size:13.5px;line-height:1.8}
 
   /* ── 기업 헤더 (스크롤 시 상단 고정) ── */
-  .co-head{display:flex;align-items:center;gap:14px;margin:0 0 14px;position:sticky;top:0;z-index:10;background:var(--bg);padding:12px 0 10px;border-bottom:1px solid var(--line)}
-  .co-head h2{font-size:22px;font-weight:800;letter-spacing:-.02em}
+  /* 스크롤 영역 맨 위(top:0)에 딱 붙는다 — .main에 위쪽 padding을 두면 그 틈으로 카드가 비치니 .main padding-top은 항상 0 */
+  .co-head{display:flex;align-items:center;gap:14px;margin:0 0 14px;position:sticky;top:0;z-index:10;background:#fff;padding:10px 16px 10px 18px;
+    border:1px solid var(--line);border-top:none;border-left:4px solid var(--accent);border-radius:0 0 12px 12px;
+    box-shadow:0 6px 14px -6px rgba(16,24,40,.28)}
+  .co-head h2{font-size:22px;font-weight:800;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:1;min-width:0;max-width:46%}
+  .co-head > span{white-space:nowrap;flex-shrink:0}
+  .co-head .badge{white-space:nowrap}
   .co-head .cp{color:var(--sub);font-size:13px}
   .co-head input{font-variant-numeric:tabular-nums}
 
@@ -140,7 +152,7 @@
   #gtoast{position:fixed;top:18px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 16px;border-radius:10px;font-size:13px;z-index:9999;max-width:380px;box-shadow:0 8px 24px rgba(0,0,0,.22)}
   #gtoast.hidden{display:none}
   table th{font-weight:700}
-  @media (max-width:900px){ .side{width:220px} .main{padding:16px 18px 60px} .top .desc,.top .rule{display:none} }
+  @media (max-width:900px){ .side{width:220px} .main{padding:0 18px 60px} .main > .addbar{margin-top:16px} .top .desc,.top .rule{display:none} }
 </style>
 </head>
 <body>
@@ -154,6 +166,7 @@
 <div class="wrap">
   <div class="side">
     <h2>기업 목록</h2>
+    <div class="srch"><input type="text" id="q" placeholder="🔍 기업명 · CORP_ID 검색" oninput="setQuery(this.value)" onkeydown="if(event.key==='Escape'){this.value='';setQuery('')}"><button class="x" id="qx" onclick="$('#q').value='';setQuery('')" title="지우기">×</button></div>
     <div class="filt" id="filt">
       <button class="on" onclick="setFilter('all')" data-f="all">전체</button>
       <button onclick="setFilter('todo')" data-f="todo">미완료</button>
@@ -161,6 +174,7 @@
     </div>
     <div id="colist"><div class="empty-list">아직 불러온 기업이 없습니다.<br>오른쪽에서 JSON 파일을 열거나 붙여넣으세요.</div></div>
     <div class="legend">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span id="donecnt" style="flex:1"></span><button class="ghost sm" onclick="resetDone()" title="이 브라우저에 저장된 완료 표시를 모두 지웁니다">완료 기록 초기화</button></div>
       <b>점 색상</b> — 조사 결과 확보 수준<br>
       <i style="background:var(--dot-ok)"></i><b>초록</b> 사업자번호 + 소개글 확보<br>
       <i style="background:var(--dot-warn)"></i><b>노랑</b> 사업자번호만 있음 (직접 조사 필요)<br>
@@ -535,8 +549,25 @@ function saveDone(m){ try{ localStorage.setItem(DONE_KEY, JSON.stringify(m)); }c
 var DONE=loadDone();
 function doneKey(c){ return (c.cp&&c.cp!=='CP미정') ? c.cp : (c.bizno ? 'biz:'+c.bizno : 'nm:'+(c.name||'')); }
 function isDone(c){ return !!DONE[doneKey(c)]; }
-var listFilter='all';
+var listFilter='all', listQuery='';
 window.setFilter=function(f){ listFilter=f; renderList(); };
+window.setQuery=function(q){ listQuery=(q||'').trim(); var s=document.querySelector('.srch'); if(s) s.className='srch'+(listQuery?' has':''); renderList(); };
+// 검색 매칭: 기업명은 부분 일치(대소문자 무시), CORP_ID는 숫자만 비교 (1632 / CP1632 / CP00001632 모두 매칭)
+function matchQuery(c){
+  if(!listQuery) return true;
+  var q=listQuery.toLowerCase();
+  if((c.name||'').toLowerCase().indexOf(q)>=0) return true;
+  var qd=q.replace(/^cp/,'').replace(/\D/g,'');
+  if(qd && c.cp && c.cp!=='CP미정'){ var cd=c.cp.replace(/\D/g,'').replace(/^0+/,''); if(cd.indexOf(qd.replace(/^0+/,''))>=0) return true; }
+  if(qd && c.bizno && c.bizno.replace(/\D/g,'').indexOf(qd)>=0) return true;
+  return false;
+}
+window.resetDone=function(){
+  var n=Object.keys(DONE).length;
+  if(!n){ showToast('저장된 완료 기록이 없습니다'); return; }
+  if(!confirm('이 브라우저에 저장된 완료 표시 '+n+'건을 모두 지웁니다.\n(지금 열린 목록뿐 아니라 이전에 완료 처리한 기업도 포함)\n\n계속할까요?')) return;
+  DONE={}; saveDone(DONE); renderList(); if(active>=0) renderDetail(); showToast('완료 기록 '+n+'건을 지웠습니다');
+};
 window.toggleDone=function(i){
   var c=companies[i]; if(!c) return;
   var k=doneKey(c);
@@ -561,6 +592,7 @@ function renderList(){
     const done=isDone(c); if(done) doneCnt++;
     if(listFilter==='todo'&&done) return;
     if(listFilter==='done'&&!done) return;
+    if(!matchQuery(c)) return;
     shown++;
     const d=document.createElement('div');
     d.className='company'+(i===active?' active':'')+(done?' done':'');
@@ -572,8 +604,9 @@ function renderList(){
     el.appendChild(d);
   });
   if(companies.length&&!shown){
-    el.innerHTML='<div class="empty-list">'+(listFilter==='done'?'완료한 기업이 아직 없습니다.':'미완료 기업이 없습니다 — 전부 끝났어요 🎉')+'</div>';
+    el.innerHTML='<div class="empty-list">'+(listQuery?'"'+esc(listQuery)+'"에 해당하는 기업이 없습니다.':(listFilter==='done'?'완료한 기업이 아직 없습니다.':'미완료 기업이 없습니다 — 전부 끝났어요 🎉'))+'</div>';
   }
+  var dc=$('#donecnt'); if(dc){ var total=Object.keys(DONE).length; dc.textContent = total ? '저장된 완료 기록 '+total+'건' : '저장된 완료 기록 없음'; }
   // 필터 버튼 상태 + 개수
   var todoCnt=companies.length-doneCnt;
   document.querySelectorAll('#filt button').forEach(function(b){
@@ -671,7 +704,7 @@ function renderDetail(){
   let h='<div class="co-head"><h2>'+c.name+'</h2>'+
     '<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">CORP_ID '+
     '<input type="text" inputmode="numeric" placeholder="숫자만 입력 (예: 40459)" value="'+esc((cpVal||'').replace(/\D/g,'').replace(/^0+/,''))+'" style="width:160px;font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onchange="updCp('+active+',this.value)">'+
-    (cpVal?'<span id="cpbadge" class="badge b-ok">입력됨 · '+cpVal+'</span>':'<span id="cpbadge" class="badge b-idle">미입력 — 뉴스 복사에 포함됨</span>')+'</span>'+
+    (cpVal?'<span id="cpbadge" class="badge b-ok">입력됨 · '+cpVal+'</span>':'<span id="cpbadge" class="badge b-idle" title="어드민에서 발급받은 CORP_ID를 넣으면 뉴스 일괄복사에 자동 포함됩니다">미입력</span>')+'</span>'+
     (isDone(c)
       ? '<button class="sm donebtn on" onclick="toggleDone('+active+')" title="'+DONE[doneKey(c)]+' 완료 처리됨 — 누르면 되돌립니다">✓ 완료됨 · 되돌리기</button>'
       : '<button class="sm donebtn" onclick="toggleDone('+active+')" title="어드민 입력까지 끝났으면 누르세요 — 목록에 완료 태그가 붙고 다음 미완료 기업으로 이동">작업 완료</button>')+
@@ -1037,7 +1070,7 @@ window.updCp=(i,v)=>{
   // 화면 전체를 다시 그리지 않고 배지·경고문만 갱신 (입력칸과 버튼을 파괴하지 않기 위함)
   var has=!!companies[i].cp;
   var b=document.getElementById('cpbadge');
-  if(b){ b.className='badge '+(has?'b-ok':'b-idle'); b.textContent=has?('입력됨 · '+companies[i].cp):'미입력 — 뉴스 복사에 포함됨'; }
+  if(b){ b.className='badge '+(has?'b-ok':'b-idle'); b.textContent=has?('입력됨 · '+companies[i].cp):'미입력'; }
   var w=document.getElementById('cpwarn');
   if(w){ w.style.display=has?'none':'inline'; }
 };
