@@ -67,13 +67,6 @@
   .thumb img{max-width:100%;max-height:100%} .thumb .ring{position:absolute;inset:0;border:2px dashed rgba(0,0,0,.12);border-radius:50%;margin:9px;pointer-events:none}
   .thumb .st{font-size:10px;color:var(--sub);text-align:center;padding:3px}
   .kwbox .lbl{font-size:12px;color:var(--sub);margin-top:8px;margin-bottom:3px}
-  .te-btn{background:#00A86B;color:#fff}
-  .te-btn:hover{background:#00966A}
-  .te-inputs input{width:100%;border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:13px}
-  .te-loading{display:inline-flex;gap:5px;align-items:center}
-  .te-loading .dot{width:6px;height:6px;border-radius:50%;background:#00A86B;display:inline-block;animation:teb 1.2s ease-in-out infinite}
-  .te-loading .dot:nth-child(2){animation-delay:.2s}
-  .te-loading .dot:nth-child(3){animation-delay:.4s}
   @keyframes teb{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
   .te-result{background:var(--okbg);border:1px solid var(--ok);border-radius:8px;padding:12px 14px}
   #gtoast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#2c2c2c;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;z-index:9999;max-width:360px;box-shadow:0 4px 16px rgba(0,0,0,.2)}
@@ -479,46 +472,8 @@ function cpBtn(el){
     navigator.clipboard.writeText(v).then(function(){ done(true); }, fallback);
   } else { fallback(); }
 }
-// ── 인라인 번역 (혁신의숲 기업소개글 번역기 이식) ──────────────
+// ── 토스트 (인라인 번역 기능은 2026-09-04 제거 — 영문 재번역은 claude.ai 아티팩트로) ──
 function showToast(msg){ var el=document.getElementById('gtoast'); if(!el)return; document.getElementById('gtoast-msg').textContent=msg; el.classList.remove('hidden'); if(window.__toastT)clearTimeout(window.__toastT); window.__toastT=setTimeout(function(){el.classList.add('hidden');},5000); }
-function updTransProduct(i,idx,v){ var c=companies[i]; if(!c.transProducts)c.transProducts=['','','']; c.transProducts[idx]=v; }
-async function doTranslate(i){
-  var c=companies[i];
-  var intro=(c.intro||'').trim();
-  if(!intro){ showToast('기업 소개글(4번)을 먼저 입력해주세요.'); return; }
-  var products=(c.transProducts||[]).map(function(s){return (s||'').trim();}).filter(Boolean);
-  var sourceLang='Korean', targetLang='English';
-  c.transLoading=true; renderDetail();
-  // 따옴표 감지: 영문 작은따옴표 및 유니코드 따옴표(‘’) 모두 (/g 없이 — lastIndex 버그 방지)
-  var hasQuoted=/'([^']+)'|‘([^’]+)’/.test(intro);
-  var processedIntro=intro;
-  if(hasQuoted && products.length>0){
-    var idx=0;
-    processedIntro=intro.replace(/'([^']+)'|‘([^’]+)’/g,function(match){ if(idx<products.length)return '['+products[idx++]+']'; return match; });
-  }
-  var quotedInstruction=hasQuoted?'- 대괄호([])로 감싸진 단어는 고유명사이므로 번역하지 말고 대괄호와 함께 그대로 유지하세요.\n':'';
-  var prompt='당신은 전문 번역가입니다. 아래 기업 소개글을 '+sourceLang+'에서 '+targetLang+'으로 번역해주세요.\n\n번역 지침:\n- 번역문에서 기업명을 직접 언급하지 마세요. 대신 "A company" 또는 "The company"로 시작하세요.\n'+quotedInstruction+'- 전문적이고 자연스러운 비즈니스 문체를 사용하세요.\n- 번역문만 출력하고 설명은 추가하지 마세요.\n\n원문:\n'+processedIntro;
-  try{
-    var controller=new AbortController();
-    var timeoutId=setTimeout(function(){controller.abort();},15000);
-    var res=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ model:"claude-sonnet-5", max_tokens:1000, messages:[{role:"user",content:prompt}] }),
-      signal:controller.signal
-    });
-    clearTimeout(timeoutId);
-    var data=await res.json();
-    if(!res.ok||data.error){ showToast('결과를 불러오는 데 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.'); c.transLoading=false; renderDetail(); return; }
-    var text=(data.content||[]).map(function(b){return b.text||'';}).join('').trim();
-    if(!text){ showToast('번역 결과가 비어있습니다. 다시 시도해주세요.'); c.transLoading=false; renderDetail(); return; }
-    c.introEn=text; c.transLoading=false; renderDetail();
-  }catch(e){
-    if(e.name==='AbortError') showToast('요청 시간이 초과되었습니다. 페이지를 새로고침 후 다시 시도해주세요.');
-    else showToast('결과를 불러오는 데 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
-    c.transLoading=false; renderDetail();
-  }
-}
 
 function renderDetail(){
   if(active<0||!companies[active]){$('#detail').innerHTML='<div class="empty">기업을 선택하세요.</div>';return;}
@@ -585,23 +540,25 @@ function renderDetail(){
     (c.intro?' <button class="sm ghost" data-live="intro" data-copy="'+esc(c.intro)+'" onclick="cpBtn(this)">복사</button>':''),
     '유일하게 수정 가능한 항목 · 양식: ☆☆기반 □□대상 ~~을 ○○하는 기업 · 주관적표현 최소화 · 액션 가나다순+및 · 서비스명 없으면 생략 · 딥테크는 정확한 업계용어 확인');
 
-  // 3. 기업소개 (영문) — 조사 단계에서 introEn으로 미리 제공됨 (버튼 번역은 claude.ai 아티팩트 환경 전용)
-  var teLoading = c.transLoading;
+  // 3. 기업소개 (영문) — 조사 단계에서 introEn으로 미리 제공됨.
+  //    국문(2번)을 수정한 경우에는 영문번역 아티팩트(claude.ai)로 보내서 다시 번역한다.
+  //    (페이지 안에서 직접 API를 부르는 방식은 로컬·Pages 환경에서 동작하지 않아 2026-09-04 제거)
+  var TRANSLATOR_URL = 'https://claude.ai/public/artifacts/2d30de12-b401-43ea-9a37-f7cce8b4c34f';
   var teResult = c.introEn||'';
-  var tp = c.transProducts||['','',''];
   var teInner =
-    '<div style="font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:8px">2번 국문을 확정한 뒤 번역하세요. 소개글 내 작은따옴표 고유명사는 아래 영문 서비스/제품명으로 등장 순서대로 치환됩니다. (선택)</div>'+
-    '<div class="te-inputs" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">'+
-      '<input type="text" placeholder="서비스/제품명 1" value="'+esc(tp[0]||'')+'" onchange="updTransProduct('+active+',0,this.value)">'+
-      '<input type="text" placeholder="서비스/제품명 2" value="'+esc(tp[1]||'')+'" onchange="updTransProduct('+active+',1,this.value)">'+
-      '<input type="text" placeholder="서비스/제품명 3" value="'+esc(tp[2]||'')+'" onchange="updTransProduct('+active+',2,this.value)">'+
-    '</div>'+
-    '<button class="sm te-btn" onclick="doTranslate('+active+')"'+((teLoading||!c.intro)?' disabled':'')+'>'+(teLoading?'번역 중...':'영어로 번역')+'</button>'+
-    (!c.intro?' <span style="color:var(--sub);font-size:12px">2번 국문을 먼저 확정하세요</span>':'')+
-    (teLoading?'<div class="te-loading" style="margin-top:10px"><span class="dot"></span><span class="dot"></span><span class="dot"></span> <span style="font-size:13px;color:var(--ok)">번역하는 중입니다...</span></div>':'')+
-    (teResult?'<div class="te-result" style="margin-top:10px"><div style="white-space:pre-wrap;font-size:14px;line-height:1.75">'+esc(teResult)+'</div><button class="sm ghost" style="margin-top:8px" data-copy="'+esc(teResult)+'" onclick="cpBtn(this)">영문 복사</button></div>':'');
+    (teResult
+      ? '<div class="te-result"><div style="white-space:pre-wrap;font-size:14px;line-height:1.75">'+esc(teResult)+'</div>'+
+        '<button class="sm ghost" style="margin-top:8px" data-copy="'+esc(teResult)+'" onclick="cpBtn(this)">영문 복사</button></div>'
+      : '<span style="color:var(--sub)">— 영문 소개 없음 (국문이 없거나 조사 단계에서 미작성)</span>')+
+    '<div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);font-size:12px;color:var(--sub);line-height:1.6">'+
+      '2번 국문을 수정했다면 아래 순서로 다시 번역하세요: <b>국문 복사</b> → <b>영문번역 아티팩트 열기</b> → 붙여넣어 번역 → 결과를 어드민에 입력'+
+      '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">'+
+        '<button class="sm ghost" data-copy="'+esc(c.intro||'')+'" onclick="cpBtn(this)"'+(c.intro?'':' disabled')+'>국문 복사</button>'+
+        '<a class="sm" href="'+TRANSLATOR_URL+'" target="_blank" rel="noopener" style="display:inline-block;background:var(--accent);color:#fff;border-radius:7px;padding:5px 10px;font-size:12px;text-decoration:none">영문번역 아티팩트 열기 ↗</a>'+
+      '</div>'+
+    '</div>';
   h+=field('3','기업소개 (영문)', teResult?'ok':'idle', teInner,
-    '조사 단계에서 영문 소개가 미리 담겨 옴 — 그대로 복사 사용 · 2번 국문을 수정한 경우 재번역은 운영매니저에게 요청 (번역 버튼은 로컬에서 작동 안 함) · 작은따옴표 속 국문 서비스명은 공식 영문명 확인 후 교체');
+    '조사 단계에서 영문 소개가 미리 담겨 옴 — 그대로 복사 사용 · 국문을 수정한 경우에만 아티팩트로 재번역 · 작은따옴표 속 국문 서비스명은 공식 영문명 확인 후 교체');
 
   // 4. 홈페이지 · 로고
   var logoNote = logoNoteHtml(c);
