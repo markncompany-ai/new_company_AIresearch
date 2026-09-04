@@ -298,6 +298,30 @@ function normalizeKw(name){
   return name; // 못 찾으면 그대로
 }
 
+// 기업(CORP) ID 정규화 — 40459 / CP40459 / CP00040459 / "cp 40459" 어떤 형태로 와도 CP+8자리로 통일
+function normCp(v){
+  if(v===0||v) v=String(v); else return '';
+  if(v.indexOf('미정')>=0) return '';
+  var d=v.replace(/[^0-9]/g,'');
+  return d? ('CP'+d.replace(/^0+/,'').padStart(8,'0')) : '';
+}
+
+// 서비스 항목 정규화 — 한벤투 양식(2026-09-04) 기준으로 통일하고 구양식 {type,name,url}·문자열도 흡수
+function normSvc(s){
+  if(typeof s==='string') s={url:s};
+  s = s||{};
+  var o={type:s.type||'', name:s.name||'', nameEn:s.nameEn||'', webUrl:s.webUrl||'', playUrl:s.playUrl||'',
+    publisher:s.publisher||'', note:s.note||'', pkg:s.pkg||''};
+  if(s.url && !o.webUrl && !o.playUrl){
+    if(/play\.google\.com/.test(s.url)) o.playUrl=s.url;
+    else if(/apps\.apple\.com/.test(s.url)) o.note = (o.note?o.note+' · ':'')+'iOS URL은 수집 대상 아님(무시됨)';
+    else o.webUrl=s.url;
+  }
+  if(!o.pkg && o.playUrl){ var m=o.playUrl.match(/[?&]id=([^&#]+)/); if(m) o.pkg=m[1]; }
+  if(!o.type) o.type = (o.webUrl&&o.playUrl)?'웹·앱' : o.playUrl?'앱' : '웹';
+  return o;
+}
+
 function parse(){
   var raw = $('#input').value.trim();
   if(!raw) return [];
@@ -317,8 +341,9 @@ function parse(){
     var reps = [];
     if(Array.isArray(o.reps)) reps = o.reps;
     else if(o.ceo) reps = [{name:o.ceo, sns:(o.sns||'')}];
-    // 서비스: [{name,url}] 또는 문자열
-    var svcList = Array.isArray(o.services)? o.services : [];
+    // 서비스: 신양식 {name,nameEn,type,webUrl,playUrl,publisher,note} · 구양식 {type,name,url} · 문자열 모두 수용
+    var svcList = (Array.isArray(o.services)? o.services : []).map(normSvc);
+    var servicesNote = o.servicesNote ? String(o.servicesNote) : '';
     // 뉴스: {domestic:[], foreign:[]}
     var news = o.news || {domestic:[], foreign:[]};
     if(Array.isArray(news)) news = {domestic:news, foreign:[]};
@@ -362,9 +387,9 @@ function parse(){
       else { validEmail=rawEmail; emailTier=(o.emailTier||'상'); }
     }
     return {
-      name:o.name||('기업'+(i+1)), cp:o.cp||'', bizno:o.bizno||'',
+      name:o.name||('기업'+(i+1)), cp:normCp(o.cp||o.corpId||o.corpid||o.companyId||o.CORP_ID), bizno:o.bizno||'',
       reps:reps, refIntro:refIntro, intro:intro, introEn:o.introEn||'',
-      svcList:svcList, news:news, homepage:o.homepage||'', logo:o.logo||'',
+      svcList:svcList, servicesNote:servicesNote, news:news, homepage:o.homepage||'', logo:o.logo||'',
       cats: (o.cats && o.cats.length)? o.cats : recommendCats(catKwSource),
       kws: matchKeywords(catKwSource),
       aiKws: o.aiKws||[],
@@ -501,7 +526,7 @@ function renderDetail(){
   const cpVal = (c.cp && c.cp!=='CP미정') ? c.cp : '';
   let h='<div class="co-head"><h2>'+c.name+'</h2>'+
     '<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">CORP_ID '+
-    '<input type="text" inputmode="numeric" placeholder="숫자만 입력 (예: 40459)" value="'+esc((cpVal||'').replace(/\D/g,''))+'" style="width:160px;font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onchange="updCp('+active+',this.value)">'+
+    '<input type="text" inputmode="numeric" placeholder="숫자만 입력 (예: 40459)" value="'+esc((cpVal||'').replace(/\D/g,'').replace(/^0+/,''))+'" style="width:160px;font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onchange="updCp('+active+',this.value)">'+
     (cpVal?'<span id="cpbadge" class="badge b-ok">입력됨 · '+cpVal+'</span>':'<span id="cpbadge" class="badge b-idle">미입력 — 뉴스 복사에 포함됨</span>')+'</span></div>';
 
   // 0. 조사자 검수 노트 (JSON의 notes 배열 — 대표자 불일치, 동명회사 제외 이력 등)
@@ -669,21 +694,38 @@ function renderDetail(){
     '상: support·info·hi·hello·contact·cs·help·ask·connect·기업명@ / 중: ceo·sales·marketing·ir@ / 금지: tax·bill·finance·account·개인메일 · 여러 개면 우선순위 높은 1개만');
 
 
-  // 8. 서비스 (웹/앱 구분 + 서비스명 + URL)
+  // 8. 서비스 (한벤투 양식: 유형 · 서비스명/영문명 · 웹URL · 플레이스토어URL+패키지명 · 퍼블리셔 · 비고 — 오프라인·iOS 수집 안 함)
   let svcInner;
   if(c.svcList && c.svcList.length){
+    var TYPE_BG = {'웹':'#1d7a4d','앱':'#7c3aed','웹·앱':'#0e7490'};
+    var svcRow = function(lbl, val){
+      return '<div style="display:flex;gap:8px;align-items:baseline;margin-top:4px;font-size:13px">'+
+        '<span style="flex:0 0 78px;color:var(--sub);font-size:12px">'+lbl+'</span>'+
+        '<span style="flex:1;min-width:200px">'+val+'</span></div>';
+    };
     svcInner = c.svcList.map(function(s){
-      var type = s.type||'웹';  // 웹/앱
-      var nm = s.name||''; var url = s.url||s;
-      var typeColor = type==='앱' ? 'background:#7c3aed;color:#fff' : 'background:#1d7a4d;color:#fff';
-      return '<div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
-        '<span style="'+typeColor+';font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px">'+type+'</span>'+
-        (nm?'<b>'+nm+'</b>':'')+
-        '<span style="flex:1;min-width:200px">'+linkVal(url)+'</span></div>';
+      var bg = TYPE_BG[s.type]||'#64748b';
+      var head = '<span style="background:'+bg+';color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px">'+s.type+'</span>'+
+        (s.name?'<b>'+s.name+'</b>':'<span style="color:var(--err)">서비스명 없음</span>')+
+        (s.nameEn?'<span style="color:var(--sub);font-size:12px">'+s.nameEn+'</span>':'')+
+        (s.publisher?'<span style="color:var(--sub);font-size:12px;margin-left:auto">퍼블리셔: '+s.publisher+'</span>':'');
+      var rows='';
+      if(s.webUrl) rows+=svcRow('웹 URL', linkVal(s.webUrl));
+      if(s.playUrl) rows+=svcRow('플레이스토어', linkVal(s.playUrl));
+      if(s.pkg) rows+=svcRow('패키지명', readonlyVal(s.pkg,'복사(어드민용)'));
+      if(!s.webUrl && !s.playUrl) rows+=svcRow('URL', '<span style="color:var(--err)">확인된 URL 없음 — 조사 재확인</span>');
+      if(s.note) rows+='<div style="margin-top:4px;font-size:12px;color:var(--warn)">⚠ '+s.note+'</div>';
+      return '<div style="margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">'+
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+head+'</div>'+rows+'</div>';
     }).join('');
-  } else { svcInner='<span style="color:var(--sub)">— 웹·앱 서비스 없음</span>'; }
-  h+=field('10','서비스',c.svcList&&c.svcList.length?'ok':'idle', svcInner,
-    '웹/앱 구분 · 서비스명 · URL 순 · 여러 개면 모두 표시 · 앱은 스토어 링크 · URL은 실제 확인된 것만');
+  } else {
+    svcInner='<span style="color:var(--sub)">— 서비스 없음</span>'+
+      (c.servicesNote?'<div style="margin-top:4px;font-size:12px;color:var(--sub)">확인 경로: '+c.servicesNote+'</div>'
+        :'<div style="margin-top:4px;font-size:12px;color:var(--warn)">⚠ servicesNote 없음 — 실제로 확인한 결과인지 조사자에게 확인</div>');
+  }
+  var svcConf = (c.svcList&&c.svcList.length) ? 'ok' : (c.servicesNote ? 'ok' : 'idle');
+  h+=field('10','서비스',svcConf, svcInner,
+    '유형(웹/앱/웹·앱) · 같은 서비스의 웹+앱은 한 카드 · 웹 URL은 구동 페이지만(홈페이지·소개 랜딩 ✗) · 앱은 퍼블리셔가 이 기업인지 확인 · 어드민 앱 입력은 패키지명 · 오프라인·iOS는 수집 안 함 · URL은 실제 확인된 것만');
 
   // 9. 기업뉴스 (표: 제목/URL/언론사/보도일 + 일괄복사)
   var dom = (c.news&&c.news.domestic)||[];
