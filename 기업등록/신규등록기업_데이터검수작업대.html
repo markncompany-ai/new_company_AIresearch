@@ -77,9 +77,10 @@
   /* ── 데이터 입력 박스 (불러온 뒤엔 접힘) ── */
   .addbar{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px; margin-bottom:18px; box-shadow:var(--shadow)}
   .addbar .hd{display:flex; align-items:center; gap:10px}
-  .addbar .hd .t{font-weight:800; font-size:14px}
-  .addbar .hd .s{font-size:12px; color:var(--sub)}
-  .addbar .hd .tg{margin-left:auto}
+  .addbar .hd .t{font-weight:800; font-size:14px; white-space:nowrap}
+  .addbar .hd .s{font-size:12px; color:var(--sub); flex:1; min-width:0}
+  .addbar .hd .tg{margin-left:auto; flex-shrink:0}
+  .filebtn{white-space:nowrap}
   .addbar .body{margin-top:12px}
   .addbar.collapsed .body{display:none}
   .addbar.collapsed{padding:12px 18px}
@@ -192,7 +193,10 @@
       <div class="hd">
         <span class="t">📥 조사 데이터 불러오기</span>
         <span class="s" id="addbar-s">JSON 파일을 열거나, Claude가 준 JSON을 붙여넣으세요 — 기업 여러 개도 한 번에</span>
-        <button class="ghost sm tg" id="addbar-tg" onclick="toggleAddbar()" style="display:none">펼치기</button>
+        <span class="tg" style="display:inline-flex;gap:6px;align-items:center">
+          <label class="filebtn" id="addbar-open" style="display:none;background:var(--accent);color:#fff;border-color:var(--accent)">📂 새 JSON 파일 열기<input type="file" id="jsonfile2" accept=".json,application/json" multiple style="display:none"></label>
+          <button class="ghost sm" id="addbar-tg" onclick="toggleAddbar()" style="display:none">붙여넣기로 열기</button>
+        </span>
       </div>
       <div class="body">
         <textarea id="input" placeholder='클로드코드 /company-research 결과 JSON을 여기에 그대로 붙여넣고 "불러오기"를 누르세요. (JSON 파일을 여기에 끌어다 놓아도 됩니다)'></textarea>
@@ -629,10 +633,12 @@ function renderList(){
 }
 // 데이터 불러온 뒤엔 입력 박스를 접어 검수 카드에 집중 — 필요하면 '펼치기'로 다시 연다
 window.setAddbar=function(collapsed){
-  var ab=$('#addbar'), tg=$('#addbar-tg'), s=$('#addbar-s'); if(!ab) return;
+  var ab=$('#addbar'), tg=$('#addbar-tg'), op=$('#addbar-open'), s=$('#addbar-s'); if(!ab) return;
   ab.className='addbar'+(collapsed?' collapsed':'');
-  if(tg){ tg.style.display=companies.length?'inline-block':'none'; tg.textContent=collapsed?'펼치기':'접기'; }
-  if(s) s.textContent = collapsed ? (companies.length+'개 기업을 불러왔습니다 — 다른 JSON을 열려면 펼치세요') : 'JSON 파일을 열거나, Claude가 준 JSON을 붙여넣으세요 — 기업 여러 개도 한 번에';
+  var has=companies.length>0;
+  if(tg){ tg.style.display=has?'inline-block':'none'; tg.textContent=collapsed?'붙여넣기로 열기':'접기'; }
+  if(op){ op.style.display=(has&&collapsed)?'inline-flex':'none'; }   // 접힌 상태에서도 새 파일을 바로 열 수 있게
+  if(s) s.textContent = collapsed ? (companies.length+'개 기업 작업 중 — 새 JSON을 열면 이 목록이 교체됩니다 (완료 기록은 열 때 새로 시작할지 물어봄)') : 'JSON 파일을 열거나, Claude가 준 JSON을 붙여넣으세요 — 기업 여러 개도 한 번에';
 };
 window.toggleAddbar=function(){ var ab=$('#addbar'); setAddbar(!(ab&&ab.classList.contains('collapsed'))); };
 
@@ -1114,11 +1120,16 @@ function loadJsonFiles(files){
   });
 }
 $('#jsonfile').addEventListener('change',function(){loadJsonFiles(this.files);this.value='';});
+$('#jsonfile2').addEventListener('change',function(){loadJsonFiles(this.files);this.value='';});   // 접힌 상태의 '새 JSON 파일 열기'
 (function(){
-  var ta=$('#input');
-  ['dragover','dragenter'].forEach(function(ev){ta.addEventListener(ev,function(e){e.preventDefault();ta.style.outline='2px dashed #1d7a4d';});});
-  ta.addEventListener('dragleave',function(){ta.style.outline='';});
-  ta.addEventListener('drop',function(e){e.preventDefault();ta.style.outline='';if(e.dataTransfer&&e.dataTransfer.files.length)loadJsonFiles(e.dataTransfer.files);});
+  // 드래그&드롭: 입력창뿐 아니라 접힌 불러오기 박스 전체에서도 받는다
+  var ta=$('#input'), ab=$('#addbar');
+  function on(el,outlineEl){
+    ['dragover','dragenter'].forEach(function(ev){el.addEventListener(ev,function(e){e.preventDefault();outlineEl.style.outline='2px dashed var(--accent)';});});
+    el.addEventListener('dragleave',function(){outlineEl.style.outline='';});
+    el.addEventListener('drop',function(e){e.preventDefault();outlineEl.style.outline='';if(e.dataTransfer&&e.dataTransfer.files.length)loadJsonFiles(e.dataTransfer.files);});
+  }
+  on(ta,ta); on(ab,ab);
 })();
 </script>
 </body>
