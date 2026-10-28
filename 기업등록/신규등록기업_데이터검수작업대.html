@@ -161,13 +161,33 @@
   #gtoast.hidden{display:none}
   table th{font-weight:700}
   @media (max-width:900px){ .side{width:220px} .main{padding:0 18px 60px} .main > .addbar{margin-top:16px} .top .desc,.top .rule{display:none} }
+
+  /* ── 단건 모드 (2026-10-28) — 기업이 1곳이면 좌측 목록을 접고 본문을 전체 폭으로 쓴다 ── */
+  body.solo .side{display:none}
+  body.solo .main{max-width:1180px;margin:0 auto}
+  body.solo #summary{display:none !important}
+  .top .asof{font-size:11.5px;color:var(--sub);background:#f3f4f6;border:1px solid var(--line);border-radius:20px;padding:3px 10px;white-space:nowrap}
+  /* 새 기업 조사 요청 박스 */
+  .askbox{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);
+    margin:0 0 14px;padding:12px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .askbox .t{font-size:13px;font-weight:800;letter-spacing:-.01em;white-space:nowrap;margin-right:2px}
+  .askbox input{border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12.5px;background:#fbfbfc;font-family:inherit}
+  .askbox input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accentbg);background:#fff}
+  .askbox #ask-name{width:180px} .askbox #ask-ceo{width:104px} .askbox #ask-biz{width:134px;font-variant-numeric:tabular-nums}
+  .askbox .go{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .askbox a.go{display:inline-block;border-radius:7px;padding:7px 11px;font-size:12.5px;font-weight:700;text-decoration:none}
+  .askbox .hint{flex-basis:100%;font-size:11.5px;color:var(--sub);line-height:1.65;border-top:1px dashed var(--line);padding-top:9px;margin-top:2px}
+  .askbox .hint b{color:var(--ink)}
+  .askbox .hint .step{display:inline-block;background:var(--accentbg);color:var(--accent2);border-radius:4px;padding:0 5px;font-weight:800;margin-right:3px}
 </style>
 </head>
 <body>
+<!-- solo-mode v2 (2026-10-28) -->
+<script src="data.js"></script>
 <div id="gtoast" class="hidden"><span id="gtoast-msg"></span></div>
 <div class="top">
   <h1>신규 등록 기업 데이터 검수 작업대</h1>
-  <span class="desc">조사 JSON을 기업별로 검수 · 수정 · 어드민에 복사</span>
+  <span class="desc" id="hdesc">조사 JSON을 기업별로 검수 · 수정 · 어드민에 복사</span>
   <span id="summary"></span>
   <span class="rule">확인된 정보만 · 추측·생성 금지 · 못 찾으면 비움</span>
 </div>
@@ -206,6 +226,22 @@
           <button id="clr" class="ghost sm">초기화</button>
           <span class="hint" style="margin:0 0 0 auto">여러 파일 동시 선택 가능 · 자동으로 합쳐짐 · 새로 불러오면 기존 목록은 교체</span>
         </div>
+      </div>
+    </div>
+    <div class="askbox" id="askbox">
+      <span class="t">🔎 새 기업 조사</span>
+      <input type="text" id="ask-name" placeholder="기업명" autocomplete="off">
+      <input type="text" id="ask-ceo" placeholder="대표자명" autocomplete="off">
+      <input type="text" id="ask-biz" placeholder="사업자등록번호" autocomplete="off">
+      <button id="ask-prompt" class="go">📋 조사 프롬프트 복사</button>
+      <a class="sm go" id="ask-open" href="https://claude.ai/new" target="_blank" rel="noopener">claude.ai 열기 ↗</a>
+      <button id="ask-copy" class="ghost sm">클로드코드용 한 줄</button>
+      <div class="hint">
+        <b>클로드코드가 없어도 조사할 수 있습니다.</b>
+        <span class="step">1</span>위에 기업명·대표자·사업자번호를 넣고 <b>조사 프롬프트 복사</b>
+        <span class="step">2</span><b>claude.ai 열기</b> → 새 대화에 붙여넣기 (웹 검색이 켜져 있어야 합니다)
+        <span class="step">3</span>받은 JSON을 이 화면 위 <b>붙여넣기로 열기</b>에 넣고 불러오면 검수 카드가 뜹니다<br>
+        클로드코드를 쓰신다면 <b>클로드코드용 한 줄</b>만 복사해 붙여넣으셔도 됩니다.
       </div>
     </div>
     <div id="cohead"></div>
@@ -376,45 +412,101 @@ let companies=[], active=-1;
 function proxied(u){return 'https://images.weserv.nl/?url='+encodeURIComponent(u.replace(/^https?:\/\//,''))}
 function loadImage(src){return new Promise((res,rej)=>{const i=new Image();i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=()=>rej();i.src=src})}
 // ── 로고 256 변환 — 로고 리사이저(markncompany-ai/logo-resizer) 로직 이식 (2026-09-04) ──
-// 배경색 감지(8지점 샘플) → 로고 바운딩박스 추출 → 256×256 캔버스에 여백 32px 중앙 배치.
+// 배경색 감지(8지점 샘플) → 로고 바운딩박스 추출 → 256×256 캔버스에 여백 32px 중앙 배치(가로로 긴 로고는 16px).
+// 여백은 로고 원본의 배경색으로 이어 칠한다(2026-09-18 변경 — 이전엔 97% 이상 차면 여백 0, 연한 배경은 순백으로 칠함).
 // 모드: auto(감지 배경색으로 채움, 거의 흰색이면 #fff) / white(배경 제거 후 흰색). 투명 출력은 프론트 문제로 쓰지 않는다 — 항상 불투명.
 function lrDetectBg(cv){
   var x=cv.getContext('2d'), w=cv.width, h=cv.height, mx=Math.floor(w/2), my=Math.floor(h/2);
   var pts=[[0,0],[w-1,0],[0,h-1],[w-1,h-1],[mx,0],[mx,h-1],[0,my],[w-1,my]], map={};
   function hx(v){return Math.min(255,v).toString(16).padStart(2,'0');}
-  pts.forEach(function(p){ var d=x.getImageData(p[0],p[1],1,1).data; var k=d[3]<30?'#ffffff':'#'+hx(d[0])+hx(d[1])+hx(d[2]); map[k]=(map[k]||0)+1; });
-  var hex=Object.keys(map).sort(function(a,b){return map[b]-map[a];})[0];
-  return {hex:hex, r:parseInt(hex.slice(1,3),16), g:parseInt(hex.slice(3,5),16), b:parseInt(hex.slice(5,7),16)};
+  pts.forEach(function(p){ var d=x.getImageData(p[0],p[1],1,1).data; var k=d[3]<30?'transparent':'#'+hx(d[0])+hx(d[1])+hx(d[2]); map[k]=(map[k]||0)+1; });
+  var top=Object.keys(map).sort(function(a,b){return map[b]-map[a];})[0];
+  // 모서리가 투명이면 배경은 '투명'이다. 흰색으로 치환해 두되 transparent 표시를 남겨,
+  // 흰 로고를 배경으로 오인해 잘라내지 못하는 일을 막는다.
+  var hex = top==='transparent' ? '#ffffff' : top;
+  return {hex:hex, transparent: top==='transparent', r:parseInt(hex.slice(1,3),16), g:parseInt(hex.slice(3,5),16), b:parseInt(hex.slice(5,7),16)};
 }
 function lrBounds(cv,bg,tol){
   tol=tol||30; var w=cv.width,h=cv.height, d=cv.getContext('2d').getImageData(0,0,w,h).data;
   var top=h,bottom=0,left=w,right=0;
   for(var y=0;y<h;y++) for(var x=0;x<w;x++){ var i=(y*w+x)*4;
-    var isBg = d[i+3]<30 || (Math.abs(d[i]-bg.r)<=tol && Math.abs(d[i+1]-bg.g)<=tol && Math.abs(d[i+2]-bg.b)<=tol);
+    // 투명 배경이면 투명 픽셀만 배경 — 색이 흰색이어도 보이는 픽셀은 로고다
+    var isBg = d[i+3]<30 || (!bg.transparent && Math.abs(d[i]-bg.r)<=tol && Math.abs(d[i+1]-bg.g)<=tol && Math.abs(d[i+2]-bg.b)<=tol);
     if(!isBg){ if(y<top)top=y; if(y>bottom)bottom=y; if(x<left)left=x; if(x>right)right=x; } }
   if(top>bottom||left>right) return {x:0,y:0,w:w,h:h};
   return {x:left,y:top,w:right-left+1,h:bottom-top+1};
 }
 function lrClearBg(cv,bg,tol){
+  if(bg.transparent) return;   // 이미 투명 배경 — 흰색을 지우면 흰 로고가 사라진다
   tol=tol||30; var x=cv.getContext('2d'), im=x.getImageData(0,0,cv.width,cv.height), d=im.data;
   for(var i=0;i<d.length;i+=4){ if(Math.abs(d[i]-bg.r)<=tol && Math.abs(d[i+1]-bg.g)<=tol && Math.abs(d[i+2]-bg.b)<=tol) d[i+3]=0; }
   x.putImageData(im,0,0);
 }
+// 투명 배경 위 로고가 밝은색인지 판정 — 불투명 픽셀 비율이 낮고(=투명 배경) 보이는 픽셀이 대부분 밝으면 true
+function lrIsLightArt(cv){
+  var w=cv.width,h=cv.height,d=cv.getContext('2d').getImageData(0,0,w,h).data;
+  var sum=0,cnt=0,opaque=0,total=w*h;
+  for(var i=0;i<d.length;i+=4){
+    if(d[i+3]>32){ opaque++; sum+=(0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2])/255; cnt++; }
+  }
+  if(!cnt) return false;
+  if(opaque/total>0.9) return false;      // 이미 불투명 배경이 깔린 이미지 — 건드리지 않는다
+  return (sum/cnt)>0.8;
+}
+// 이미지 테두리의 대표색 — 로고가 가장자리까지 꽉 찬 이미지에서 여백을 무슨 색으로 이어 칠할지 정한다.
+// 테두리 픽셀을 모아 16단계로 묶고 가장 많은 묶음의 평균색을 돌려준다. 투명은 흰색으로 본다.
+function lrEdgeFill(cv){
+  var w=cv.width,h=cv.height,d=cv.getContext('2d').getImageData(0,0,w,h).data, pts=[];
+  var sx=Math.max(1,Math.floor(w/200)), sy=Math.max(1,Math.floor(h/200));
+  for(var x=0;x<w;x+=sx){ pts.push([x,0]); pts.push([x,h-1]); }
+  for(var y=0;y<h;y+=sy){ pts.push([0,y]); pts.push([w-1,y]); }
+  var bk={};
+  pts.forEach(function(p){ var i=(p[1]*w+p[0])*4, r,g,b;
+    if(d[i+3]<30){ r=g=b=255; } else { r=d[i]; g=d[i+1]; b=d[i+2]; }
+    var k=(r>>4)+'-'+(g>>4)+'-'+(b>>4); var o=bk[k]||(bk[k]={n:0,r:0,g:0,b:0}); o.n++; o.r+=r; o.g+=g; o.b+=b; });
+  var top=Object.keys(bk).sort(function(a,b){return bk[b].n-bk[a].n;})[0], o=bk[top];
+  function hx(v){return Math.round(v).toString(16).padStart(2,'0');}
+  return '#'+hx(o.r/o.n)+hx(o.g/o.n)+hx(o.b/o.n);
+}
 // 반환: {data:dataURL, bg:{hex..}, fallback:bool}. CORS로 픽셀을 못 읽으면(캔버스 오염) 단순 비율축소로 폴백.
-function buildLogo(img, mode){
+// 크게 줄일 때 한 번에 줄이면 획이 끊기고 계단이 진다(브라우저 기본 리샘플링이 픽셀을 건너뛴다).
+// 절반씩 단계적으로 줄인 뒤 마지막만 목표 크기로 맞춘다(2026-09-28 — 로고가 깨져 보인다는 지적).
+function lrDrawSmooth(ctx, srcCv, b, dw, dh){
+  var cur=document.createElement('canvas'); cur.width=b.w; cur.height=b.h;
+  var cc=cur.getContext('2d'); cc.imageSmoothingEnabled=true; cc.imageSmoothingQuality='high';
+  cc.drawImage(srcCv,b.x,b.y,b.w,b.h,0,0,b.w,b.h);
+  while(cur.width/2>dw && cur.height/2>dh){
+    var half=document.createElement('canvas');
+    half.width=Math.max(1,Math.round(cur.width/2)); half.height=Math.max(1,Math.round(cur.height/2));
+    var hc=half.getContext('2d'); hc.imageSmoothingEnabled=true; hc.imageSmoothingQuality='high';
+    hc.drawImage(cur,0,0,half.width,half.height); cur=half;
+  }
+  ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+  ctx.drawImage(cur,0,0,cur.width,cur.height,(256-dw)/2,(256-dh)/2,dw,dh);
+}
+function buildLogo(img, mode, customFill){
   var tmp=document.createElement('canvas'); tmp.width=img.naturalWidth||img.width; tmp.height=img.naturalHeight||img.height;
   tmp.getContext('2d').drawImage(img,0,0);
   var out=document.createElement('canvas'); out.width=256; out.height=256; var ctx=out.getContext('2d');
   try{
     var bg=lrDetectBg(tmp), b=lrBounds(tmp,bg);
     if(mode==='white') lrClearBg(tmp,bg);
-    var nearWhite = bg.r>230&&bg.g>230&&bg.b>230;
-    var fill = mode==='white' ? '#ffffff' : (nearWhite?'#ffffff':bg.hex);
+    // 여백 색 — 로고 원본의 배경색을 그대로 이어 칠해 로고 둘레에 경계선이 생기지 않게 한다.
+    // (예전엔 연한 배경을 순백으로 바꿔 칠해서 #f2f2f2 같은 배경이면 로고 주변에 네모 테가 보였다)
+    // 로고가 가장자리까지 꽉 찬 이미지는 모서리 8점 대신 테두리 전체의 대표색을 쓴다.
+    var reachesEdge = b.w>=tmp.width*0.97 && b.h>=tmp.height*0.97;
+    var fill = mode==='white' ? '#ffffff' : (reachesEdge ? lrEdgeFill(tmp) : bg.hex);
+    // 흰 로고 보호: lrDetectBg는 투명 모서리를 흰색으로 보므로, 투명 배경에 밝은 로고면 흰 바탕에 흰 로고가 된다.
+    // 보이는 픽셀이 대부분 밝으면 검정 바탕으로 뒤집는다.
+    if(fill==='#ffffff' && lrIsLightArt(tmp)) fill='#000000';
+    if(customFill) fill=customFill;   // 검수자가 스포이트·색선택으로 직접 지정한 배경색이 우선
     ctx.fillStyle=fill; ctx.fillRect(0,0,256,256);
-    var full = b.w>=tmp.width*0.97 && b.h>=tmp.height*0.97;
-    var pad = full?0:32, max=256-pad*2, r=Math.min(max/b.w,max/b.h), dw=b.w*r, dh=b.h*r;
-    ctx.drawImage(tmp,b.x,b.y,b.w,b.h,(256-dw)/2,(256-dh)/2,dw,dh);
-    return {data:out.toDataURL('image/png'), bg:bg, fill:fill, fallback:false};
+    // 여백은 항상 32px — 원본에 여백이 있든 없든 같은 크기로 맞춘다(예전엔 97% 이상 차면 0px이라 들쭉날쭉했다)
+    // 여백 기본 32px, 가로로 긴 로고(가로가 세로의 2.5배 이상)는 16px — 폭이 먼저 한계에 걸려 글씨가 작아지기 때문(2026-09-28)
+    var pad = (b.w >= b.h*2.5) ? 16 : 32;
+    var max=256-pad*2, r=Math.min(max/b.w,max/b.h), dw=b.w*r, dh=b.h*r;
+    lrDrawSmooth(ctx,tmp,b,dw,dh);
+    return {data:out.toDataURL('image/png'), bg:bg, fill:fill, fallback:false, upscaled:r>1.05};
   }catch(e){
     // 픽셀 접근 불가 → 흰 배경 위에 여백 14% 단순 축소 (예전 방식, 투명 없음)
     ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,256,256);
@@ -422,6 +514,52 @@ function buildLogo(img, mode){
     ctx.drawImage(img,(256-w)/2,(256-h)/2,w,h);
     return {data:out.toDataURL('image/png'), bg:null, fill:'#ffffff', fallback:true};
   }
+}
+
+// ── 스포이트(2026-09-21 추가, 리사이저와 동일)
+// 화면에 보이는 픽셀을 찍으면 축소·반투명 때문에 흐려진 색이 잡힌다. 그래서 원본을 크게 띄우고
+// 색은 화면이 아니라 원본 이미지의 픽셀 값에서 직접 읽는다.
+function lrPickColor(img, onPick){
+  var nw=img.naturalWidth||img.width, nh=img.naturalHeight||img.height;
+  var src=document.createElement('canvas'); src.width=nw; src.height=nh;
+  src.getContext('2d').drawImage(img,0,0);
+  var data;
+  try{ data=src.getContext('2d').getImageData(0,0,nw,nh).data; }
+  catch(e){ showToast('이 로고는 픽셀을 읽을 수 없습니다 — 캡처해서 Ctrl+V로 붙여넣으면 스포이트를 쓸 수 있습니다'); return; }
+  function hx(v){ return v.toString(16).padStart(2,'0'); }
+  function colorAt(x,y){ var i=(y*nw+x)*4; return data[i+3]<30 ? null : '#'+hx(data[i])+hx(data[i+1])+hx(data[i+2]); }
+
+  var panel=document.createElement('div');
+  panel.style.cssText='position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;background:var(--card,#fff);color:var(--fg,#222);border:1px solid var(--line,#ddd);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.25);padding:16px;display:flex;flex-direction:column;gap:10px;max-width:calc(100vw - 32px)';
+  var title=document.createElement('div');
+  title.style.cssText='font-size:13px;font-weight:600';
+  title.textContent='배경색으로 쓸 곳을 클릭하세요 (Esc 닫기)';
+  var scale=Math.min(560/nw,360/nh,8);
+  var view=document.createElement('canvas');
+  view.width=Math.max(1,Math.round(nw*scale)); view.height=Math.max(1,Math.round(nh*scale));
+  view.style.cssText='cursor:crosshair;border:1px solid var(--line,#eee);border-radius:6px;max-width:100%;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 0 0/12px 12px';
+  var vctx=view.getContext('2d'); vctx.imageSmoothingEnabled=false;
+  vctx.drawImage(src,0,0,view.width,view.height);
+  var info=document.createElement('div');
+  info.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px;font-family:monospace;min-height:20px';
+  var chip=document.createElement('div'); chip.style.cssText='width:20px;height:20px;border-radius:4px;border:1px solid var(--line,#ddd)';
+  var hexEl=document.createElement('span'); hexEl.textContent='원본 위에 마우스를 올리세요';
+  info.append(chip,hexEl);
+  var cancel=document.createElement('button'); cancel.className='sm ghost'; cancel.textContent='취소'; cancel.style.alignSelf='flex-end';
+  panel.append(title,view,info,cancel);
+  document.body.appendChild(panel);
+
+  function pos(e){ var r=view.getBoundingClientRect();
+    var x=Math.floor((e.clientX-r.left)/r.width*nw), y=Math.floor((e.clientY-r.top)/r.height*nh);
+    return (x<0||y<0||x>=nw||y>=nh)?null:[x,y]; }
+  function close(){ panel.remove(); document.removeEventListener('keydown',onKey,true); }
+  function onKey(e){ if(e.key==='Escape'){ e.stopPropagation(); close(); } }
+  view.addEventListener('mousemove',function(e){ var p=pos(e); if(!p) return; var col=colorAt(p[0],p[1]);
+    chip.style.background=col||'repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 0 0/8px 8px';
+    hexEl.textContent=col?col.toUpperCase():'투명 (흰색으로 칠함)'; });
+  view.addEventListener('click',function(e){ var p=pos(e); if(!p) return; onPick(colorAt(p[0],p[1])||'#ffffff'); close(); });
+  cancel.addEventListener('click',close);
+  document.addEventListener('keydown',onKey,true);
 }
 
 // 팀원 사전매칭 로직 (matchKeywordsDict 제공) + 동의어 정규화
@@ -513,10 +651,23 @@ function parse(){
       var TIER_MID = ['ceo','sales','marketing','ir'];
       var BANNED = ['tax','bill','finance','fn','account','accounting'];
       var PERSONAL_DOMAINS = ['gmail.com','naver.com','hanmail.net','daum.net','nate.com','kakao.com','outlook.com','hotmail.com','yahoo.com','icloud.com'];
-      // 회사 공용계정 판별: 아이디(숫자 제거)가 홈페이지 도메인에 포함되면 회사 계정으로 간주
-      var idCore = localPart.replace(/[0-9._-]/g,'');
+      // 회사 공용계정 판별 — 아이디를 구분자·숫자로 토막 내어 도메인 라벨과 대조한다.
+      // 통짜로 비교하면 pharmavision_nu@naver.com 처럼 접미사가 붙은 회사 계정이 탈락한다.
       var hp = (o.homepage||'').toLowerCase();
-      var isCompanyAccount = idCore.length>=3 && hp.indexOf(idCore)>=0;
+      var hpLabel = (function(u){
+        var host = u.replace(/^https?:\/\//,'').split('/')[0].replace(/^www\./,'');
+        var skip = ['co','kr','com','net','org','io','ai','biz','me','info','shop','store'];
+        return (host.split('.').filter(function(s){ return s && skip.indexOf(s)<0; })[0])||'';
+      })(hp);
+      var idTokens = localPart.split(/[^a-z]+/i).filter(function(t){ return t.length>=3; });
+      var matchedToken = '';
+      if(hpLabel.length>=3){
+        idTokens.some(function(t){
+          if(hpLabel.indexOf(t)>=0 || t.indexOf(hpLabel)>=0){ matchedToken=t; return true; }
+          return false;
+        });
+      }
+      var isCompanyAccount = !!matchedToken;
       if(BANNED.indexOf(localPart)>=0){
         rejectedEmail = rawEmail; emailNote='세금·회계용 계정';
       } else if(PERSONAL_DOMAINS.indexOf(domain)>=0){
@@ -825,7 +976,7 @@ function renderDetail(){
     '<div style="margin-top:8px;font-size:12px;color:var(--sub);background:var(--bg);border:1px dashed var(--line);border-radius:7px;padding:6px 10px">📋 캡처한 로고가 있으면 이 화면에서 <b>Ctrl+V</b> — 배경 감지·여백 정리·256 변환까지 자동 (리사이저와 동일)</div>';
   h+=field('4-1','로고',hasLogo?'ok':'warn',
     '<div class="logo-wrap"><div class="thumb" id="thumb"><div class="ring"></div></div><div style="flex:1;min-width:0">'+logoRight+'</div></div>',
-    '점선 원 = 프론트 노출 영역(원형 크롭) · 256×256, 여백 32px 중앙 배치 · 배경은 자동 감지(거의 흰색이면 흰색) · 원본 200px 미만이면 화질미달');
+    '점선 원 = 프론트 노출 영역(원형 크롭) · 256×256, 여백 32px 중앙 배치(가로로 긴 로고는 16px) · 배경은 자동 감지 · 원본 200px 미만이면 화질미달');
 
   // 5. 카테고리
   let chips=CATEGORIES.map((cat,ci)=>{
@@ -1034,6 +1185,7 @@ function applyLogoImage(c, img, source){
   c.logoW=img.naturalWidth||img.width; c.logoH=img.naturalHeight||img.height;
   c.logoLowRes = Math.min(c.logoW,c.logoH) < 200;   // 짧은 변 200px 미만이면 256 확대 시 깨짐
   if(!c.logoMode) c.logoMode='auto';
+  c.logoCustomFill=null;   // 새 이미지를 채택하면 직접 지정한 배경색은 초기화
   var r=buildLogo(img, c.logoMode);
   c.logoData=r.data; c.logoBg=r.bg; c.logoFill=r.fill; c.logoFallback=r.fallback; c.logoStatus='ok';
 }
@@ -1042,10 +1194,19 @@ function logoModesHtml(c){
   var modes=[['auto','자동 (감지된 배경색)'],['white','흰 배경']];   // 투명 모드는 프론트에서 문제 생겨 제외 (2026-09-04)
   var btns=modes.map(function(m){ var on=(c.logoMode||'auto')===m[0];
     return '<button class="sm'+(on?'':' ghost')+'" onclick="setLogoMode('+active+',\''+m[0]+'\')"'+(c.logoFallback?' disabled':'')+'>'+m[1]+'</button>'; }).join('');
+  var fillNow=(c.logoCustomFill||c.logoFill||'#ffffff');
+  var how = c.logoCustomFill ? ' (직접 지정)' : (c.logoMode==='auto' ? ' (자동 감지)' : '');
   var bgTxt = c.logoFallback ? '<span style="color:var(--warn)">픽셀을 읽을 수 없어 흰 배경 위 단순 축소로 처리됨 — 캡처해서 붙여넣으면 배경 감지 가능</span>'
-    : '배경 '+(c.logoFill||'#FFFFFF').toUpperCase()+(c.logoMode==='auto'?' (자동 감지)':'')+' · 투명 없음';
+    : '배경 '+fillNow.toUpperCase()+how+' · 투명 없음';
   var src = c.logoSource==='paste' ? ' · <span style="color:var(--accent)">붙여넣은 캡처 사용 중</span>'+(c.logo?' <button class="sm ghost" onclick="loadLogo('+active+')">원본 주소로 되돌리기</button>':'') : '';
-  return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px"><span style="font-size:12px;color:var(--sub)">배경 처리</span>'+btns+'</div>'+
+  // 배경색 직접 지정 — 색상칸 클릭 또는 스포이트(원본에서 색 찍기)
+  var picker = c.logoFallback ? '' :
+    '<span style="display:inline-flex;gap:6px;align-items:center;margin-left:4px">'+
+      '<input type="color" value="'+fillNow+'" title="배경색 직접 선택" onchange="setLogoFill('+active+',this.value)" style="width:26px;height:22px;padding:0;border:1px solid var(--line);border-radius:5px;background:none;cursor:pointer">'+
+      '<button class="sm ghost" onclick="pickLogoFill('+active+')">💧 스포이트</button>'+
+      (c.logoCustomFill?'<button class="sm ghost" onclick="setLogoFill('+active+',\'\')">↩ 자동으로</button>':'')+
+    '</span>';
+  return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px"><span style="font-size:12px;color:var(--sub)">배경 처리</span>'+btns+picker+'</div>'+
     '<div style="font-size:12px;color:var(--sub);margin-top:4px">'+bgTxt+src+'</div>';
 }
 function refreshLogoUI(i){
@@ -1055,7 +1216,13 @@ function refreshLogoUI(i){
   var lm=$('#logomodes'); if(lm) lm.innerHTML=logoModesHtml(c);
   var dl=$('#dlbtn'); if(dl) dl.disabled=!c.logoData;
 }
-window.setLogoMode=(i,mode)=>{ var c=companies[i]; if(!c||!c.logoImg) return; c.logoMode=mode; var r=buildLogo(c.logoImg,mode); c.logoData=r.data; c.logoBg=r.bg; c.logoFill=r.fill; c.logoFallback=r.fallback; refreshLogoUI(i); };
+function rebuildLogo(i){ var c=companies[i]; if(!c||!c.logoImg) return;
+  var r=buildLogo(c.logoImg, c.logoMode, c.logoCustomFill);
+  c.logoData=r.data; c.logoBg=r.bg; c.logoFill=r.fill; c.logoFallback=r.fallback; refreshLogoUI(i); }
+window.setLogoMode=(i,mode)=>{ var c=companies[i]; if(!c||!c.logoImg) return; c.logoMode=mode; c.logoCustomFill=null; rebuildLogo(i); };
+// 배경색 직접 지정 — 빈 값이면 자동 감지로 되돌린다
+window.setLogoFill=(i,hex)=>{ var c=companies[i]; if(!c||!c.logoImg) return; c.logoCustomFill=hex?hex.toLowerCase():null; rebuildLogo(i); };
+window.pickLogoFill=(i)=>{ var c=companies[i]; if(!c||!c.logoImg) return; lrPickColor(c.logoImg,function(hex){ window.setLogoFill(i,hex); }); };
 // 검수자가 화면 캡처한 로고를 Ctrl+V로 붙여넣으면 현재 선택된 기업의 로고로 채택 (리사이저와 동일 처리)
 window.addEventListener('paste',function(e){
   if(active<0||!companies[active]) return;
@@ -1130,6 +1297,88 @@ $('#jsonfile2').addEventListener('change',function(){loadJsonFiles(this.files);t
     el.addEventListener('drop',function(e){e.preventDefault();outlineEl.style.outline='';if(e.dataTransfer&&e.dataTransfer.files.length)loadJsonFiles(e.dataTransfer.files);});
   }
   on(ta,ta); on(ab,ab);
+})();
+
+// ── 새 기업 조사 요청 (2026-10-28) ────────────────────────────
+// 클로드코드가 없는 사람은 '조사 프롬프트 복사'로 조사 규칙 전문을 받아 claude.ai에 붙여넣는다.
+// 규칙 본문은 조사 스킬(SKILL.md)을 그대로 심어 둔 것이라, 스킬이 바뀌면 patch.js를 다시 돌려야 한다.
+var RESEARCH_SKILL = "# 혁신의숲 기업 등록 — 1차 조사\n\n혁신의숲 기업 등록을 위한 1차 조사를 수행한다. 결과는 검수 작업대에 붙여넣을 JSON으로 출력하고 `기업등록/결과/` 폴더에 저장한다.\n\n> 서비스 판정 세부 목록(회사소개 경로·앵커 패턴, 공유 플랫폼 호스트, 커머스 접미어, 제외 사유 어휘, 함정 목록)은\n> **`references/서비스판정규칙.md`** 에 있다. 서비스 판정이 애매할 때 그 파일을 읽는다.\n\n## 절대 원칙 (위반 시 작업 무효)\n\n1. **실제 확인된 정보만 출력한다.** 추측·생성·조합 금지.\n2. **URL은 검색 결과나 실제 페이지에서 본 것만 쓴다.** 홈페이지 주소에 제품명을 붙여 만드는 식의 조합은 절대 금지. (과거 실제 사고: `stradvision.com/svnet/`, 로고 경로를 임의 생성 → 둘 다 존재하지 않는 주소였음)\n3. **확인 못 한 항목은 생략한다.** 억지로 채우지 않는다. 비어 있으면 사람이 채우지만, 가짜가 들어가면 그대로 등록되어 더 위험하다.\n4. **유사 사명 주의.** 이름이 비슷한 다른 회사를 가져오지 않는다. 반드시 대표자명·사업자번호로 교차 확인한다. 확신이 없으면 비운다.\n   - 실제 사례: \"씨쓰리브이\"(대표 강연주) vs \"씨브이쓰리\"(대표 양진호) — 완전히 다른 회사\n   - 실제 사례: \"(주)알록\"이 뷰티디바이스/폐업 전자상거래/의료기기 3곳 존재\n5. **출처를 말할 수 있어야 한다.** 어디서 봤는지 설명 못 하는 값은 넣지 않는다.\n6. **후보를 지우지 말고 사유를 붙여 남긴다.** 특히 서비스는 제외해도 `notes`에 사유를 적는다. 애매하면 `undecided`.\n7. **뉴스는 무조건 최신순이다.** 네이버 뉴스 PC 최신순(`where=news&sort=1`)을 직접 열어 가장 최근 기사부터 **최소 5건, 최대 15건**을 담는다.\n   WebSearch 결과만 보고 끝내면 최근 1~2년치를 통째로 놓친다. 오래된 기사로 5건을 채우는 것은 **작업 실패**다.\n   **날짜는 반드시 기사 본문에서 확인한다** — 검색 목록 날짜와 구글 뉴스 RSS `pubDate`는 실제 발행일과 어긋난다. (3단계 참조)\n\n## 조사 절차 (기업마다 반드시 이 순서로)\n\n### 1단계: 기업 식별\n- WebSearch로 기업명 검색. 결과가 애매하면 \"기업명 + 대표자명\"으로 재검색.\n- **대표자명이 일치하는지 반드시 확인.** 불일치하면 다른 회사다.\n- 사명 표기가 다르면(예: 스트라드비전 vs 스트라드비젼) 사용자에게 알린다.\n- **기업명 검색만으로 홈페이지를 못 찾으면 아래 두 경로를 반드시 더 돌린다.** 셋은 서로 못 찾는 것을 메운다 —\n  이름이 흔하면 ①이 막히고, 홈페이지에 번호를 안 적어 둔 회사는 ②가 막히고, 신설·소규모면 ③만 남는다.\n  1. **사업자번호 역검색** — 검색창에 번호를 `123-45-67890` 형태(따옴표로 묶어)로 넣는다. 회사는 홈페이지 푸터·이용약관·쇼핑몰 안내에 사업자등록번호를 표시할 의무가 있어, 걸리면 그 회사 사이트가 맞다. **찾는 즉시 검증이 끝나므로 이름 검색보다 확실하다.**\n     - 네이버 모바일 검색(`https://m.search.naver.com/search.naver?where=m_web&query=...`)이 잘 걸리고 차단도 없었다(2026-09-22, 25곳 표본 전부 정상·자체 도메인 3곳 발견).\n     - 결과에 사업자정보 모음 사이트(비즈위키·머니핀·bizno·114 등)가 섞여 나온다. 이들은 홈페이지가 아니므로 결과에 쓰지 않되, **주소·업종·대표전화를 보완하는 용도로는 쓴다**(연락처 항목이 가장 많이 빈다).\n  2. **기업명 + 대표자명 검색** — 동명 회사를 걸러 내는 데 효과가 있다(광철님 실사용 확인, 2026-09-22). 채용공고·보도자료·기관 공고에 둘이 같이 적히는 경우가 많다.\n- **검색에 나온 후보 도메인은 상위 몇 개만 고르지 말고 전부(최대 10개) 열어본다.** 여는 비용은 싸고, 안 열어서 놓치는 손해가 훨씬 크다.\n  - **순위를 \"검색 결과에 많이 나온 순\"으로 매기지 않는다.** 그러면 포털·커뮤니티·기업정보 디렉터리(디시인사이드·로컬비즈·비즈위키·테크월드 등)가 항상 위로 올라오고 진짜 회사 도메인이 밀린다. 이런 사이트는 후보에서 아예 제외한다.\n  - 우선순위는 ① 도메인에 **사명 로마자/영문**이 들어 있는지 ② 사업자번호 일치 ③ 제목에 사명 포함 순이다.\n  - **쇼핑몰 호스팅 주소도 자사 사이트 후보다** — `*.cafe24.com`·`*.cafe24api.com`, 아임웹(`imweb.me`), 식스샵, 고도몰, 윅스 등. 네이버 스마트스토어만 쇼핑몰로 보지 않는다.\n  - 실제 사고(2026-09-28 광철님 지적): 이노젬의 `innogem.cafe24api.com`은 검색 결과 6위라 상위 4개만 열던 당시 규칙에 걸려 한 번도 열리지 않았다. 도메인에 사명이 그대로 들어 있고 사업자번호(539-49-00550)도 적혀 있어 열었으면 바로 확정됐다. 732곳에서 이렇게 열지 않고 넘어간 후보가 920개였다\n- **번호가 다르다는 이유로 버린 후보는 그냥 버리지 말고 `notes`에 남긴다.** (예: `후보 mondjewel.com — 사이트 표기 사업자번호 불일치`) 검수자가 다시 처음부터 찾는 일을 막는다.\n\n### 2단계: 홈페이지 직접 방문 (필수, 생략 금지)\n- 검색 요약만 보고 끝내지 말 것. **반드시 홈페이지를 직접 열어서 확인한다.**\n- **최상위 주소가 비어 보인다고 버리지 않는다.** 내용이 거의 없는 껍데기 루트(수십~수백 바이트) 뒤에 실제 사이트가 숨어 있는 경우가 많다. 다음을 순서대로 확인한 뒤에야 \"없음\"으로 판정한다.\n  1. 검색 결과에 나온 **경로를 그대로** 연다. 루트(`/`)로 깎아서 열지 말 것\n  2. 응답이 2KB 미만이면 `meta refresh`·`frame`/`iframe` `src`·`location.href` 를 읽어 **따라 들어간다**\n  3. 그래도 없으면 `/webhome/`, `/main/`, `/home/`, `/kr/`, `/index.html` 같은 흔한 경로를 시도한다\n  - 실제 사고(2026-09-26 광철님 지적): 한국위생연구소를 \"홈페이지 미확보\"로 처리했는데, `koreahlab.co.kr` 루트가 75바이트 껍데기였고 실제 사이트는 `koreahlab.co.kr/webhome/` 에 있었다. 그 페이지에 기업명과 사업자번호(669-81-02000)가 그대로 적혀 있었다. 732곳 중 91곳이 같은 함정이었다\n- **검색으로 홈페이지가 안 나오면 후보 도메인을 직접 열어서 확인한다.** 웹검색은 해외 인덱스 기준이라 국내 `.co.kr`·`.kr` 도메인을 자주 놓친다.\n  - 후보 생성: 영문 사명 기준 `<사명>.co.kr` → `.kr` → `.com` → `.net` 순으로 실제로 접속해 본다\n  - **접속해서 그 회사가 맞다고 확인된 것만 기록한다.** 열어보지 않은 주소를 결과에 적는 것은 여전히 금지 — 열어서 확인하는 것은 추측이 아니라 검증이다\n  - 열었는데 다른 회사이거나 접속이 안 되면 그 주소는 버리고 홈페이지를 생략한다\n  - 실제 사고: (주)파마비전을 \"홈페이지 없음\"으로 처리했으나 `pharmavision.co.kr`이 실재했다. 검색에는 동명의 튀르키예·남아공 기업만 나왔고 후보 도메인을 열어보지 않은 것이 원인\n- 먼저 WebFetch로 시도하고, 본문이 비어 나오거나 내용이 부실하면(JS 렌더링 사이트) **브라우저 도구(mcp__Claude_Browser__navigate → get_page_text)로 실제 렌더링해서 읽는다.** 그래도 안 보이면 screenshot으로 확인한다.\n- **푸터(맨 아래)와 Contact/About 하위 페이지**에서 다음을 찾는다 (연락처가 하위 페이지에만 있는 경우가 많음):\n  - 사업자등록번호 (이미지로 되어 있으면 screenshot/zoom으로 읽기 시도)\n  - 대표 전화번호\n  - 대표 이메일\n  - 로고 이미지 주소 (페이지 소스에서 실제 확인된 주소만) — 아래 '로고 찾기' 절차대로\n- **로고 찾기 — 다음을 전부 확인한다. 일부만 보고 \"없음\"으로 단정하지 않는다.**\n  1. `header`/`nav` 안의 `img` (로고는 거의 항상 여기 있다)\n  2. `alt`·`src`·`class`에 `logo`/`brand`/`ci`/`symbol`이 들어간 `img` — **`alt` 속성을 반드시 읽는다**\n  3. CSS `background-image`, 인라인 `svg`\n  4. `<link rel=\"icon\">`, `og:image` 메타태그\n  - **이미지 목록을 잘라 보지 않는다.** 전수로 훑고, 자사 로고와 고객사·파트너사 로고를 구분한다\n  - **호스팅 도메인만 보고 판단하지 않는다.** 네이버 CDN(`pstatic.net`), 위블리·윅스(`wixstatic.com`), 카페24 등 외부 CDN에 올린 자사 로고가 흔하다. 자사 도메인이 아니라는 이유로 버리지 말고 `alt`와 위치로 판단한다\n  - 실제 사고: 엔디넥스 헤더의 `alt=\"NDNEX Logo\"`(849×376) 이미지를 `pstatic.net` 주소라는 이유로 지도 썸네일로 단정해 \"로고 없음\"으로 처리했다\n  - 외부 CDN 주소면 끊길 수 있으므로 `notes`에 적어 검수자가 내려받아 보관하게 한다\n- **동시에 상단 메뉴·푸터의 링크 목록을 수집해 둔다** — 4단계 서비스 찾기의 재료가 된다.\n- 끝까지 읽을 수 없으면 그 사실을 보고에 적고 해당 항목은 생략한다.\n\n### 3단계: 뉴스 검색\n- **WebSearch만 믿지 말 것.** WebSearch는 해외 인덱스 기준이라 **국내 언론 기사, 특히 최근 1~2년치를 통째로 놓친다.**\n  - 실제 사고: 일신오토클레이브를 WebSearch로만 찾아 2019~2024년 기사 5건만 넣었는데, 뉴스 탭에는 2025~2026년 기사가 5건 더 있었다. **결과가 부실하면 거기서 멈추지 말고 검색 경로를 바꿔 재검색한다.**\n- **주 경로는 네이버 뉴스 PC 최신순이다** — `https://search.naver.com/search.naver?where=news&sort=1&query=<인코딩>` (2페이지는 `&start=11`).\n  기사 직접 URL을 그대로 주고 차단도 없다. 모바일판(`m.search.naver.com`)은 무한스크롤이라 `start`가 안 먹고 10건에서 끊긴다. PC판도 질의에 따라 `start=11`이 1페이지와 같은 결과를 주는 경우가 있으니, **질의를 3~5가지로 바꿔 가며**(사명 단독 / 사명+대표자 / 사명+업종어 / 영문명) 후보를 모으는 쪽이 확실하다.\n- **구글 뉴스는 보조로만 쓴다. 두 가지 함정이 있다(2026-10-20 실측, 10배치 전부 동일).**\n  - 구글 뉴스 탭(`tbm=nws&tbs=sbd:1`)은 curl이면 JS 리다이렉트로 빈 응답, 내장 브라우저면 봇 감지(`/sorry/index`)에 막힌다. **Claude in Chrome**(`mcp__claude-in-chrome__*`)으로는 열리는 경우가 있다. CAPTCHA는 직접 풀지 말고 사용자에게 요청한다.\n  - **구글 뉴스 RSS(`news.google.com/rss/search`)의 `pubDate`는 실제 발행일과 최대 3개월 어긋난다.** (실측: 쿠키뉴스 기사 RSS 2026-10-10 → 본문 2026-07-01) **목록 뽑는 용도로만 쓰고 날짜 근거로는 절대 쓰지 않는다.**\n  - RSS로 제목만 잡히고 원문 URL을 못 구하는 기사도 생긴다. 그런 건은 넣지 말고 `notes`에 \"제목은 확인됐으나 원문 URL 미확보\"로 남긴다.\n- 네이버 뉴스 목록의 날짜도 본문 날짜와 다를 수 있다(실측: 목록 2026.08.05 → 본문 2025-05-30). **날짜는 반드시 본문·메타태그에서 확인한다.**\n- DDG HTML 검색(`html.duckduckgo.com/html/`)은 제목→URL 해결에 잘 듣지만 2~3회면 202로 막힌다.\n- 회사 홈페이지의 News/보도자료 페이지도 확인한다. 단 자사 게시물은 뉴스가 아니므로 넣지 않는다.\n- **허브에 이미 등록된 기업이면 기존 뉴스를 함께 확인한다** — `innoforest_search_companies`로 companyId를 얻고 `innoforest_get_news`로 조회. 기존 뉴스가 오래됐으면 새로 찾은 최신 기사를 보고에 명시한다.\n- **최소 5건, 최대 15건**을 최신순으로 담는다. 5건을 못 채우면 그 사실을 보고에 적는다. 기간 제한 없음. **정확도 우선** — 동명 기업 기사는 제외.\n- **기업이 주어가 아닌 기사는 제외한다** (업계 일반 기사, 관계사 대표 자격 인터뷰 등). 중고 장비 거래글·쇼핑몰 게시물도 뉴스가 아니다.\n- 각 기사는 날짜/언론사/제목/URL 4개가 필요. **날짜는 기사 본문에서 확인한다** — 검색 결과의 '1개월 전' 같은 상대 표기나 URL 추정에 의존하지 않는다.\n\n### 4단계: 서비스 찾기 (아래 '서비스 수집 규칙' 전체 적용)\n수집원을 **모두** 돌린다. 하나라도 빠뜨리면 서비스를 덜 잡는다.\n1. **홈페이지 링크** — 2단계에서 모아둔 메뉴·푸터 링크에서 후보 추출\n2. **앱마켓** — 구글플레이 **와** 애플 앱스토어 **둘 다** 검색\n3. **웹검색** — `\"<기업명> 서비스\"`, `\"<기업명> 앱\"` 등\n4. **쇼핑몰 후보가 하나도 없으면** `\"<기업명> 스마트스토어\"`를 **최소 한 번** 반드시 검색\n\n### 5단계: 소개글 작성\n- **[참고] 소개(refIntro)**: 자유 서술. 사업 내용을 풍부하게(3~5문장). 카테고리·키워드 추출의 근거가 됨.\n- **양식 소개글(intro)**: 아래 규칙 엄수.\n\n## 기업소개글 양식 규칙\n\n기본 문형: `☆☆기반 □□대상 ~~을 ○○하는 기업`\n\n- 문장은 항상 **\"기업\"으로 끝난다.**\n- ☆☆(수단/기술): AI 등 사업의 기초 기술이 있을 때만\n- □□(대상): 타겟이 명시됐을 때만, 문장 앞쪽에\n- ○○(액션): 제품 형태에 따라 — 앱/웹→개발·운영, 상품/하드웨어→개발·제조, 콘텐츠→제작·제공\n- 서비스명은 작은따옴표: '스파인 리셋'. **서비스명이 없으면 생략한다.**\n- 액션 2개 이상: 가나다순 + 마지막 앞에 '및' (예: 개발 및 제조)\n- 서비스 2개 초과: 2개까지 나열 후 '등'\n- **금지 표현**: 1등, 다양한, 간편, 최대, 쉽다, 전문, 누구나, 편리, 혁신, 최초, 프리미엄 등 주관적 문구\n- 외래어는 한글로 (넷플릭스 O, Netflix X / 콘텐츠 O, 컨텐츠 X). 단 AI, SaaS, IoT 등 기술용어는 예외.\n- **딥테크·바이오는 정확한 업계 용어를 쓴다.** (예: \"모양기억 폴리머\" X → \"형상기억 고분자\" O)\n- **\"플랫폼\"은 웹서비스를 연상시키므로, 실제로 하드웨어/기기면 쓰지 않는다.**\n\n## 항목별 수집 규칙\n\n| 항목 | 규칙 |\n|---|---|\n| 홈페이지 | 서비스 사이트가 아닌 **기업 홈페이지 우선** |\n| 로고 | 홈페이지에서 확인된 이미지 주소만. 못 찾으면 생략 |\n| 사업자번호 | 홈페이지 푸터에서 확인. 사용자가 준 값이 있으면 그것 사용 |\n| 대표자 | 국문 이름만 |\n| 대표자 SNS | **동명이인 위험 최고.** 그 회사 대표임이 명확히 확인될 때만. 애매하면 반드시 비운다 |\n| 카테고리 | 24개 중 최대 3개, 특징 잘 드러나는 순서대로 |\n| 키워드 | **반드시 아래 키워드명 목록에서만** 선택. 동의어를 키워드로 쓰지 않는다 |\n| 연락처 | **유선번호만.** 010 휴대폰은 넣지 않는다 |\n| 이메일 | 아래 '이메일 판정 규칙' 참조 |\n| 서비스 | 아래 '서비스 수집 규칙' 참조. 국문명 + **영문명(nameEn)** 함께 |\n| 뉴스 | **무조건 최신순** 최소 5건·최대 15건. 구글 뉴스 탭 최신순 정렬로 직접 확인 필수. 오래된 기사로 채우면 실패 |\n\n## 이메일 판정 규칙\n\n**우선순위 상**: support, info, hi, hello, contact, cs, help, ask, connect, 기업명@\n**우선순위 중**: ceo, sales, marketing, ir@\n**절대 금지**: tax, bill, finance, fn, account, accounting@ (세금·회계용)\n\n**개인메일 도메인 처리** (개인정보 법적 리스크 — 엄격 준수)\n대상 도메인: gmail.com · naver.com · hanmail.net · daum.net · nate.com · kakao.com · outlook.com · hotmail.com · yahoo.com · icloud.com\n\n- 아이디가 **회사명·홈페이지 도메인과 일치**하거나 공용 계정명(info·contact 등)이면 → **수집하되 \"검수 필요\"로 표기**하고 사유를 적는다.\n- 아이디가 회사명과 무관한 개인 이름·별칭이면 → **수집하지 않는다.**\n- **일치 판정 방법**: 아이디를 구분자(`.` `_` `-`)와 숫자로 토막 낸 뒤, **3글자 이상인 토막**이 홈페이지 도메인 라벨과 서로 포함 관계면 회사 계정으로 본다. 3글자 미만 일치는 우연으로 보고 인정하지 않는다.\n  - `playtown808@gmail.com` + `playtown.biz` → 토막 `playtown` = 도메인 `playtown` → **회사 계정**\n  - `pharmavision_nu@naver.com` + `pharmavision.co.kr` → 토막 `pharmavision` = 도메인 `pharmavision` → **회사 계정** (접미사 `_nu`가 붙어도 인정)\n  - `okpt@hanmail.net` + `physiorobo.co.kr` → 토막 `okpt`가 도메인과 무관 → **개인 메일, 제외**\n- 이메일이 여러 개면 우선순위 높은 것 1개만.\n\n## 서비스 수집 규칙\n\n> 세부 목록(경로·앵커 패턴, 공유 플랫폼 호스트, 커머스 접미어, 제외 사유 어휘, 함정)은 `references/서비스판정규칙.md`.\n\n### 유형 3종 — `온라인`만 수집한다\n\n| 유형 | 정의 | 수집 |\n|---|---|---|\n| **온라인** | 온라인 플랫폼, 웹·앱 서비스 운영 | 대상 |\n| **오프라인** | 오프라인 사업장 기반 매출. 지점명 빼고 브랜드명 1개만 (노티드 성수점 X → 노티드 O) | 제외 |\n| **기타** | 제조·바이오·상품·솔루션. 명명된 브랜드/기술/제품만, 산업명·단순 기술명 불가 | 제외 |\n\n### 등록 규칙 8개 (노션 운영 매뉴얼 \"C. 서비스/제품 & 방문자분석\")\n\n1. **서비스가 2개 이상이면 각각 별도 등록** — 서로 다른 웹/앱 URL 필요 (쿠팡 / 쿠팡이츠)\n2. **회사 홈페이지는 서비스 URL이 아니다** — `bucketplace.com` X / `ohou.se` O\n   - 예외: 그 홈페이지 주소의 이름이 등록 서비스명과 일치하면 남긴다\n3. **소개만 하고 운영되지 않는 페이지 제외** — 실제 운영되는(로그인 등이 있는) 웹·앱만\n   - `baemin.com` X, `doctornow.co.kr` X / `kurly.com/main` O\n4. **여러 서비스를 한꺼번에 소개하는 통합 페이지 제외** (예: `wafour.com`)\n   - 판정: 같은 메뉴 그룹 안에 서로 다른 목적지 링크가 여럿이면 그 부모 링크가 통합 소개 페이지\n5. **같은 도메인의 하위 경로형 제품 라인은 각각 등록한다.**\n   - 로플랫 → `loplat.com/loplat-x`, `/loplat-i`, `/loplat-dmp`, `/loplat-laas` **각각**\n   - 서비스파인더 파이프라인은 트래픽 집계 때문에 호스트 단위로 묶지만, **1차 조사는 등록 기준(각각)을 따른다.** 같은 호스트 하위 경로임이 눈에 띄면 `notes`에 남겨 검수자가 판단하게 한다\n6. **외부 루트 도메인도 등록 가능** — 스마트스토어·카페24·노션·아임웹 위에 올라간 서비스 OK. 단 링크가 실제로 열리는지 확인\n7. **B2B SaaS, 폐쇄몰은 등록하지 않는다** (`b2b-saas` / `closed-mall`)\n8. **앱은 구글플레이 + 애플 앱스토어 둘 다** 검색해 해당 기업 서비스로 확인되면 링크 전체 등록\n\n### 올린다 / 안 올린다\n\n**올린다**\n- 웹 서비스 — 로그인·이용이 가능한 웹사이트/웹앱\n- 앱 서비스 — 구글플레이 / 애플 앱스토어\n- 커머스 서비스 — 온라인으로 상품·예약을 거래하는 서비스\n- 이름 붙은 브랜드 — `®`·`™`·`(R)` 표시가 붙었거나 기업이 자사 브랜드로 내세우는 고유 이름 (물리 제품이라도 이름은 후보로 올린다)\n\n**안 올린다**\n- 만져지는 물건 그 자체 (화장품·식품·기기)\n- **장비 모델 번호** — `PT-V10`·`CIB-1000A` 같은 영문+숫자 조합은 브랜드가 아님\n- 회사 소개만 하는 홈페이지 / 회사소개류 페이지 (경로·앵커 목록은 references)\n- 뉴스 기사·보도자료 그 자체\n\n### 앱 판정\n\n- **구글플레이와 애플 앱스토어를 둘 다** 검색한다\n- 검색 결과에서 **개발사명이 일치할 때만** 채택\n- 개발사 계정이 확인되면 그 계정의 **전체 앱을 역으로 확장**해서 수집\n- **iOS와 구글플레이의 같은 앱은 하나로 통합**한다 (URL은 둘 다 기록)\n- **동명 앱 함정**: 앱 이름이 회사명과 같아도 개발사가 다르면 남의 앱이다.\n  - 실제 사례: MCN \"플레이타운\"을 검색하면 메타버스 농장 게임 \"플레이타운\"(개발사 1zlabs)이 나온다. 등록하면 안 된다\n- 검색해도 그 기업 앱이 없으면 **앱은 없는 것.** URL을 추측해서 만들지 않는다\n\n### 서비스명 규칙\n\n- **영문명(`nameEn`)을 함께 넣는다.** 확인 우선순위 (1) 기업 홈페이지 표기 (2) 서비스 URL 도메인에서 추정(`ohou.se` → `ohouse`) (3) 보도자료. **애매하면 생략**\n- 용도별 2개 버전이면 `_` + `~용`: `자란다_선생님용` / `자란다_부모님용`\n- **이름 정리는 띄어쓰기·대소문자만.** 괄호와 밑줄은 지우지 않는다 (지우면 별개 서비스가 뭉개짐 — 실측 25건)\n- 슬로건·메뉴 라벨로 보이는 이름(쉼표·느낌표 포함, `~합니다`/`~하세요` 종결)은 서비스명이 아닐 가능성이 높다 → references의 \"이름다움\" 판정 참조\n- 언어 서브도메인(`en.` `cn.` 등)은 본체로 접는다 → references 참조\n\n### 제외한 서비스는 사유를 남긴다\n\n지우지 말고 `notes`에 `서비스 제외: <이름 또는 URL> (<사유>)` 형태로 적는다.\n사유 어휘: `offline` / `other` / `b2b-saas` / `closed-mall` / `ownership-transferred` / `undecided`\n**확신이 안 서면 무조건 `undecided`.** 그 기업 것이 맞는지 애매하면 지우지 말고 이유와 함께 남긴다.\n\n## 카테고리 24개 (이 중에서만 선택)\n\n광고/마케팅, 교육, 금융/보험/핀테크, 게임, 모빌리티/교통, 물류, 부동산/건설, 뷰티/화장품, AI/딥테크/블록체인, 소셜미디어/커뮤니티, 여행/레저, 유아/출산, 인사/비즈니스/법률, 제조/하드웨어, 커머스, 콘텐츠/예술, 통신/보안/데이터, 패션, 푸드/농업, 환경/에너지, 홈리빙/펫, 헬스케어/바이오, 피트니스/스포츠, 기타\n\n## 키워드 목록 (반드시 이 284개 중에서만 선택)\n\n**중요**: 아래 목록에 없는 단어를 키워드로 만들지 말 것. 소개글에서 동의어를 발견해도 그 동의어가 아니라 아래 목록의 정식 키워드명을 쓴다.\n- 나쁜 예: \"라스트마일\" (동의어) → 좋은 예: \"배송/배달\" (정식 키워드명)\n- 나쁜 예: \"인공지능\" (목록에 없음) → 좋은 예: \"AI\"\n\n이커머스, 중고, 라이브커머스, 리테일테크, 크라우드펀딩, 직구/역직구, 큐레이션, 정기구독, 유통, 스마트오더, 리뷰, 도매, 성인용품, 물류솔루션/풀필먼트, 배송/배달, 3PL, 로봇배송, 콜드체인, SCM, 퀵서비스, 방송, 뉴스, 출판, 음악, 영화, 드라마, 웹툰/만화/웹소설, 애니메이션, 미술, 공연, 댄스/무용, 사진, 디자인, OTT, MCN/인플루언서, 숏폼, 뉴스레터, 한류/K-POP/K-Contents, 팬덤, 연예인, SNS, 커뮤니티, 메세지, 데이팅, 결혼, 결제/페이먼트, 스타트업투자, 자산관리, 대출, 송금, 외환/환전, 보험/인슈어테크, 주식/증권, 은행, BNPL, 마이데이터, POS, 비상장, STO, 로보어드바이저/퀀트, 디지털헬스케어, 바이오/의료, 치아, 다이어트, 심리상담/정신건강, 암, 신약, 진단/검사, 의료기기, 원격진료, 병원정보, 건강기능식품, 여성용품, 백신, 노화/당뇨/성인병, 디지털치료제, 간호/간병, 요양, 건강검진, 성형, 피부시술, 뇌과학, 수면/슬립테크, 마스크, 영어, 수학, 외국어, 취미교육, 성인실무교육, 초등교육, 청소년교육, 유아교육, 비대면교육, 개인화교육, 선생님, 식당예약, 맛집정보/리뷰, 밀키트, 간편식/HMR, 비건, 대체육, 음료, 커피, 전통주, 주류, 신선식품, 디저트, 농업/애그테크, 축산업, 수산업, 꽃, 프랜차이즈, 패션, 신발, 잡화, 쥬얼리, 명품/중고명품, 스킨케어/클렌징, 색조/메이크업, 헤어/바디, 향수, 선케어, 미용기기, 뷰티테크, 화장품정보/리뷰, 미용실, 리워드, 애드테크, 마케팅솔루션, 소비자조사, 바이럴마케팅, 숙박, 항공권, 여행정보, 캠핑, 레저/액티비티, 가전, 로봇, 반도체, 디스플레이, 배터리, 소재, 부품, 기계장비, 화학, 웨어러블, 스마트팩토리, 스마트폰, 노트북/PC, 태블릿, 저장장치, 소부장, IoT, 양자컴퓨팅, 가구, 인테리어/리모델링, 생활용품/소품, 청소/설거지, 세탁, 이사, 문구, 사료, 펫패션, 펫케어/펫테크, 펫보험, P2E, 게임제작, 이스포츠, 게임유통, 스트리밍, 지도/네비게이션/GPS, 신차, 중고차, 수입차, 주차, 자율주행, 드론, 마이크로모빌리티/킥보드, 카쉐어링/차량공유, 세차, 정비, 렌터카, 전기차, 커넥티드카/ADAS, 택시, 대중교통, 대리운전, 전기자전거, 유모차, 우주항공, 코워킹, 코리빙, 부동산중개, 공유주방, 건축/설계, 안전, 재난, 스마트시티, 도시재생, 프롭테크, 상권분석, 천연자원, 태양광, 수소에너지, 신재생에너지, 리사이클링/업사이클링, 폐기물/분리수거, 그린테크, 클린테크, 카본테크, 에코테크, 지오테크, 핵, 구인구직/채용, 조직관리/조직문화, 인사솔루션, 아르바이트, CRM/챗봇, 협업툴/그룹웨어, 화상회의/리모트워크/원격근무, 전자계약, 재능공유, 아웃소싱, 법률, 특허/IP, 세금, 회계, 경리/경영관리, 문서작성, 통번역, 소상공인, 보안/암호화, 통신/네트워크/5G, 클라우드, 프로그래밍개발, 데이터분석, 블루투스/근거리통신, 인터넷가입, 암호화폐, 코인거래소, 블록체인기술, NFT/NFT거래소, web3.0, AI, 3D프린팅, 3D그래픽/CG, 빅데이터/머신러닝, 비전센싱/영상인식/센서, VR/AR/메타버스, 자연어처리/텍스트마이닝, 검색/검색엔진, 버추얼 휴먼, 생성형AI, 개인화, 유아동복, 장난감/완구, 키즈카페, 육아/돌봄, 유아용품, 이유식/유아식품, 임신/출산, 소아과, 장례, 홈트레이닝, PT/피트니스, 필라테스/요가/스트레칭, 스포츠/운동, 골프, 테니스, 1인가구, 남성, 시니어/실버, 장애인, 여성창업, 스타트업/창업, D2C, 플랫폼/마켓플레이스, SaaS/엔터프라이즈, 렌탈/대여, 비영리/기부/사회적기업, 비대면/무인시스템/Untact, 기타서비스, ESG, 공유경제/긱이코노미\n\n## 출력 형식 (JSON)\n\n**확인된 항목만 쓴다. 빈 항목은 키 자체를 생략한다.** (생략하면 작업대가 자동으로 빈 값 처리, 빈 문자열도 쓰지 말 것)\n\n**값 안에 곧은 큰따옴표(`\"`)를 쓰지 않는다.** 뉴스 제목처럼 원문에 큰따옴표가 있으면 둥근 따옴표 `“ ”`로 바꿔 넣는다.\n`\\\"`로 이스케이프하면 JSON 자체는 유효하지만, 채팅에서 복사할 때 역슬래시가 떨어져 나가 작업대에서 \"Unterminated string in JSON\" 오류가 난다 (실제 사고: 일신오토클레이브 뉴스 제목 3건).\n작은따옴표 `'`는 이스케이프가 필요 없으므로 그대로 써도 된다.\n\n```json\n[\n  {\n    \"name\": \"기업명\",\n    \"cp\": \"CP00040459\",\n    \"bizno\": \"000-00-00000\",\n    \"ceo\": \"대표자국문명\",\n    \"homepage\": \"https://...\",\n    \"logo\": \"https://...\",\n    \"phone\": \"02-000-0000\",\n    \"email\": \"contact@...\",\n    \"sns\": [\"https://linkedin.com/...\"],\n    \"refIntro\": \"참고용 자유서술 3~5문장\",\n    \"intro\": \"양식 소개글\",\n    \"introEn\": \"영문 소개글 (intro가 있을 때만)\",\n    \"cats\": [\"1순위\", \"2순위\", \"3순위\"],\n    \"aiKws\": [\"키워드1\", \"키워드2\", \"키워드3\", \"키워드4\", \"키워드5\"],\n    \"services\": [{\"type\": \"웹\", \"name\": \"서비스명\", \"nameEn\": \"ServiceName\", \"url\": \"https://...\"}],\n    \"news\": [{\"date\": \"YYYY-MM-DD\", \"press\": \"언론사\", \"title\": \"제목\", \"url\": \"https://...\"}],\n    \"notes\": [\"검수 포인트 — 대표자 불일치, 동명회사 제외 이력, 개인메일 수집 사유, 서비스 제외 사유 등\"]\n  }\n]\n```\n\n**단축 규칙**:\n- **`cp` (기업 ID)**: 사용자가 요청에 기업 ID를 같이 준 기업만 넣는다. **조사해서 알아내는 값이 아니다 — 안 주면 키를 생략한다.** 받은 형태가 `40459`든 `CP40459`든 `CP00040459`든 그대로 넣으면 작업대가 `CP+8자리`로 맞춰서 해당 기업 카드에 자동 매칭한다(뉴스 엑셀 복사의 CORP_ID 칸에도 자동으로 들어감)\n- 대표자 1명이면 `\"ceo\": \"이름\"` 한 줄. 공동대표만 `\"reps\": [{\"name\":\"A\",\"sns\":[]}, {\"name\":\"B\",\"sns\":[]}]` 사용\n- **`services`**: `type`은 `\"웹\"` 또는 `\"앱\"`. `nameEn`은 확인됐을 때만 넣고 애매하면 키를 생략한다. iOS·구글플레이 둘 다 있으면 같은 `name`으로 각 스토어 URL을 하나씩 항목으로 넣는다\n- 뉴스는 배열만 쓰면 국내로 처리. 국외 기사가 있을 때만 `\"news\": {\"domestic\":[...], \"foreign\":[...]}` 형태 사용\n- 정보가 거의 없는 기업은 3~4줄로 끝나도 정상 (예: `[{\"name\":\"씨쓰리브이\",\"bizno\":\"754-88-03723\",\"ceo\":\"강연주\"}]`)\n- **`notes`**: 검수자가 봐야 할 주의사항은 채팅 보고가 아니라 이 배열에 기업별로 적는다 (검수작업대가 \"검수 포인트\" 박스로 표시). 제외한 서비스 사유도 여기 적는다. 없으면 생략\n- **`introEn`**: intro를 작성했으면 영문 번역도 함께 넣는다 (검수작업대의 번역 버튼은 로컬 HTML에서 작동하지 않으므로 조사 단계에서 채워야 함). 규칙: 기업명 대신 \"A company\"로 시작, 작은따옴표 서비스명은 공식 영문명이 확인되면 그것을, 아니면 원문 그대로 유지, 비즈니스 문체\n\n## 마무리\n\n1. JSON 전문을 코드블록 하나로 출력한다.\n2. JSON 아래에 다음을 짧게 보고한다:\n   - 찾지 못한 항목과 그 이유\n   - 유사 사명·동명이인 등 주의사항\n   - 사명 표기가 다른 경우\n   - 홈페이지를 읽을 수 없었던 경우\n   - \"검수 필요\" 표기한 항목과 사유\n   - 제외한 서비스와 사유 (특히 undecided)\n";
+(function(){
+  var pb=$('#ask-prompt'), cb=$('#ask-copy'); if(!pb||!cb) return;
+  function vals(){
+    return { n:($('#ask-name').value||'').trim(),
+             c:($('#ask-ceo').value||'').trim(),
+             b:($('#ask-biz').value||'').trim() };
+  }
+  function need(v){
+    if(v.n) return true;
+    showToast('기업명은 반드시 입력해 주세요');
+    $('#ask-name').focus();
+    return false;
+  }
+  // 복사는 기존 cpBtn 폴백(클립보드 API → execCommand)을 그대로 쓴다.
+  function put(btn, txt){
+    btn.setAttribute('data-copy', txt.split('&').join('&amp;').split('<').join('&lt;'));
+    cpBtn(btn);
+  }
+  function target(v){
+    return '기업명: '+v.n+'\n'+
+           '사업자등록번호: '+(v.b||'(모름)')+'\n'+
+           '대표자명: '+(v.c||'(모름)');
+  }
+  pb.addEventListener('click', function(){
+    var v=vals(); if(!need(v)) return;
+    put(pb, RESEARCH_SKILL+
+      '\n\n---\n\n# 조사 대상\n\n'+target(v)+
+      '\n\n위 규칙 그대로 이 기업을 조사해 주세요. 웹 검색으로 실제 페이지를 열어 확인하고, '+
+      '확인되지 않은 항목은 추측해서 채우지 말고 비워 두세요. 결과는 JSON 코드블록 하나로 주세요.');
+    showToast('조사 프롬프트를 복사했습니다 — claude.ai 새 대화에 붙여넣으세요 (웹 검색 켜고)');
+  });
+  cb.addEventListener('click', function(){
+    var v=vals(); if(!need(v)) return;
+    var txt='기업등록 1차 조사 해줘 — '+[v.n,v.b,v.c].filter(Boolean).join(' / ');
+    put(cb, txt);
+    // 복사 성공 여부는 버튼 라벨이 알려준다. 토스트는 실패했을 때 손으로 가져갈 수 있도록 문구만 보여준다.
+    showToast('요청문 — '+txt);
+  });
+  ['#ask-name','#ask-ceo','#ask-biz'].forEach(function(s){
+    $(s).addEventListener('keydown', function(e){ if(e.key==='Enter') pb.click(); });
+  });
+})();
+
+// ── 단건 모드 (2026-10-28) ────────────────────────────────────
+// 기업이 1곳이면 좌측 목록(검색·필터·범례)은 쓸 일이 없으므로 접고 본문을 넓게 쓴다.
+// 여러 곳이면 기존과 똑같이 목록이 나온다. renderDetail이 불릴 때마다 맞춰 준다.
+(function(){
+  var orig = renderDetail;
+  window.renderDetail = renderDetail = function(){
+    orig.apply(this, arguments);
+    document.body.classList.toggle('solo', companies.length === 1);
+  };
+})();
+
+// ── 프리로드 부트 (2026-10-28) ────────────────────────────────
+// 같은 폴더에 data.js가 있으면(window.__PRELOAD) 페이지를 열 때 바로 띄운다. JSON 파일을 따로 열 필요가 없다.
+// data.js가 없으면 이 블록은 조용히 건너뛰고 기존과 똑같이 동작한다.
+// 완료 기록 확인창은 띄우지 않는다 — 프리로드는 '새 명단 시작'이 아니라 '이 기업 보기'이므로.
+(function(){
+  var P = window.__PRELOAD;
+  if(!P) return;
+  var arr = Array.isArray(P) ? P : [P];
+  if(!arr.length) return;
+  $('#input').value = JSON.stringify(arr);
+  var parsed = parse();
+  if(!parsed || !parsed.length) return;
+  companies = parsed; active = 0;
+  setFilter('all');
+  renderDetail();
+  setAddbar(true);
+  if(window.__ASOF){
+    var el=document.createElement('span'); el.className='asof';
+    el.textContent='조사 기준 '+window.__ASOF;
+    var d=$('#hdesc'); if(d) d.after(el);
+  }
+  $('#main').scrollTop=0;
 })();
 </script>
 </body>
